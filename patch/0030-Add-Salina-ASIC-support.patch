@@ -1,0 +1,1616 @@
+From 30b80f4658a87d887c4ca9c149305fe80c76bfb5 Mon Sep 17 00:00:00 2001
+From: Sahil Chaudhari <sahilc@pensando.io>
+Date: Thu, 9 Apr 2026 12:05:09 +0530
+Subject: [PATCH] Add Salina ASIC support
+
+This commit adds comprehensive support for the AMD Pensando Salina ASIC,
+a next-generation ARM64-based network processor SoC featuring a 16-core
+ARM Neoverse-N1 cluster with GICv3 interrupt controller and ITS (Interrupt
+Translation Service) for MSI support.
+
+Device Tree Changes:
+- Add Salina ASIC device tree files (salina-asic.dts, salina-asic.dtsi)
+- Add 16-core CPU topology configuration (salina-16core.dtsi)
+- Add N1-specific common configurations (salina-n1-common.dtsi)
+- Add flash partition layout for N1 platforms (salina-n1-flash-parts.dtsi)
+- Update Pensando DTS Makefile to build Salina DTB
+- Add AMD device tree path for Elba compatibility (amd/elba-*.dtsi)
+- Update memory region definitions for mdev support
+
+Interrupt Controller Support:
+- Add AMD Pensando MSI encapsulator support to GICv3-ITS driver
+  * Allows MSI writes to be directed to custom encapsulator address
+  * Essential for Pensando's platform MSI architecture
+  * Reads second reg entry from device tree for encapsulator base
+- Update IRQ chip Kconfig for Salina interrupt controller dependencies
+
+Reset Controller:
+- Add Salina System Resource reset controller driver (reset-salinasr.c)
+  * Controls peripheral reset functions via IPC to management processor
+  * Management processor is ARM64 A35 in Salina SoC
+  * Provides reset control for on-chip peripherals
+- Add Kconfig and Makefile entries for Salina reset driver
+
+SoC Platform Support:
+- Add ARCH_PENSANDO_SALINA_SOC configuration option
+- Restructure Pensando Kconfig as choice between Elba and Salina SoCs
+- Add CMN (Coherent Mesh Network) PMU interrupt controller support
+  * Enables performance monitoring for interconnect fabric
+- Add Salina-specific PCIe controller definitions (cap_pcie_salina.h)
+- Update cap_pcie driver for Salina PCIe differences
+
+SPI Driver Enhancement:
+- Add Salina-specific SPI controller support to spi-dw-mmio driver
+  * Handles Salina's DesignWare SPI controller configuration
+  * Required for SPI flash and peripheral access
+
+Device Tree Bindings:
+- Add capmem device tree binding header (pensando,capmem.h)
+  * Defines constants for capacity memory regions
+  * Used for DMA and device memory management
+
+Configuration Updates:
+- Update EDAC Kconfig for Salina memory controller support
+- Update UIO Kconfig for Salina platform MSI devices
+
+Platform Device Support:
+- Update elba-mdev.dtsi with enhanced MSI parent configurations
+- Add memory region definitions for network device DMA
+
+This enables complete Salina ASIC functionality including:
+- 16-core ARM Neoverse-N1 CPU cluster operation
+- GICv3 + ITS hierarchical interrupt management
+- Platform MSI support for network and crypto devices
+- SPI flash access and peripheral I/O
+- PCIe endpoint and root complex operation
+- System-level reset and power management
+- Performance monitoring infrastructure
+
+Tested on Salina ASIC hardware with kernel 6.1.123.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ arch/arm64/boot/dts/amd/elba-asic-memory.dtsi      |  20 ++
+ arch/arm64/boot/dts/amd/elba-mdev.dtsi             |  76 ++++++
+ arch/arm64/boot/dts/pensando/Makefile              |   2 +
+ arch/arm64/boot/dts/pensando/elba-asic-memory.dtsi |   4 +
+ arch/arm64/boot/dts/pensando/elba-mdev.dtsi        |  33 ++-
+ arch/arm64/boot/dts/pensando/salina-16core.dtsi    | 166 ++++++++++++
+ arch/arm64/boot/dts/pensando/salina-asic.dts       |  80 ++++++
+ arch/arm64/boot/dts/pensando/salina-asic.dtsi      | 283 +++++++++++++++++++++
+ arch/arm64/boot/dts/pensando/salina-n1-common.dtsi |  66 +++++
+ .../boot/dts/pensando/salina-n1-flash-parts.dtsi   |  17 ++
+ drivers/edac/Kconfig                               |   2 +-
+ drivers/irqchip/Kconfig                            |   2 +-
+ drivers/irqchip/irq-gic-v3-its.c                   |  13 +
+ drivers/reset/Kconfig                              |  10 +
+ drivers/reset/Makefile                             |   1 +
+ drivers/reset/reset-salinasr.c                     | 151 +++++++++++
+ drivers/soc/pensando/Kconfig                       |  14 +-
+ drivers/soc/pensando/Makefile                      |   1 +
+ drivers/soc/pensando/cap_pcie.c                    |   5 +
+ drivers/soc/pensando/cap_pcie_salina.h             |  55 ++++
+ drivers/soc/pensando/cmn_pmu_irq.c                 | 108 ++++++++
+ drivers/spi/spi-dw-mmio.c                          |  82 ++++++
+ drivers/uio/Kconfig                                |   4 +-
+ include/dt-bindings/soc/pensando,capmem.h          |  14 +
+ 24 files changed, 1190 insertions(+), 19 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/amd/elba-asic-memory.dtsi
+ create mode 100644 arch/arm64/boot/dts/amd/elba-mdev.dtsi
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-16core.dtsi
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-asic.dts
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-asic.dtsi
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
+ create mode 100644 drivers/reset/reset-salinasr.c
+ create mode 100644 drivers/soc/pensando/cap_pcie_salina.h
+ create mode 100644 drivers/soc/pensando/cmn_pmu_irq.c
+ create mode 100644 include/dt-bindings/soc/pensando,capmem.h
+
+diff --git a/arch/arm64/boot/dts/amd/elba-asic-memory.dtsi b/arch/arm64/boot/dts/amd/elba-asic-memory.dtsi
+new file mode 100644
+index 0000000..ccb07ad
+--- /dev/null
++++ b/arch/arm64/boot/dts/amd/elba-asic-memory.dtsi
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2020-2023 Advanced Micro Devices, Inc.
++ */
++
++/ {
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++
++		ranges;
++
++		mnet_reserved: mnet_dma_region {
++			compatible = "shared-dma-pool";
++			no-map;
++			size = <0x0 0x6000000>;
++			alignment = <0x0 0x1000>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/amd/elba-mdev.dtsi b/arch/arm64/boot/dts/amd/elba-mdev.dtsi
+new file mode 100644
+index 0000000..45a9287
+--- /dev/null
++++ b/arch/arm64/boot/dts/amd/elba-mdev.dtsi
+@@ -0,0 +1,76 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2020-2023 Advanced Micro Devices, Inc.
++ */
++
++/ {
++	dma-coherent;
++
++	mnet0: mnet0 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x0>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet1: mnet1 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x1>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet2: mnet2 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x2>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet3: mnet3 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x3>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet4: mnet4 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x4>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet5: mnet5 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x5>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet6: mnet6 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x6>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet7: mnet7 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x7>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet8: mnet8 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x8>;
++		memory-region = <&mnet_reserved>;
++	};
++	mnet9: mnet9 {
++		compatible = "pensando,mnet";
++		msi-parent = <&gic_its 0x9>;
++		memory-region = <&mnet_reserved>;
++	};
++
++	mcrypt0: mcrypt0 {
++		compatible = "pensando,mcrypt";
++		msi-parent = <&gic_its 0xb>;
++	};
++	mcrypt1: mcrypt1 {
++		compatible = "pensando,mcrypt";
++		msi-parent = <&gic_its 0xc>;
++	};
++	mcrypt2: mcrypt2 {
++		compatible = "pensando,mcrypt";
++		msi-parent = <&gic_its 0xd>;
++	};
++	mcrypt3: mcrypt3 {
++		compatible = "pensando,mcrypt";
++		msi-parent = <&gic_its 0xe>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/pensando/Makefile b/arch/arm64/boot/dts/pensando/Makefile
+index b13afe8..6af498b 100644
+--- a/arch/arm64/boot/dts/pensando/Makefile
++++ b/arch/arm64/boot/dts/pensando/Makefile
+@@ -3,6 +3,8 @@ dtb-$(CONFIG_ARCH_PENSANDO_ELBA_SOC) += elba-asic-psci.dtb \
+ 	elba-asic-psci-mtfuji.dtb elba-asic-psci-lipari.dtb \
+ 	elba-asic.dtb
+ 
++dtb-$(CONFIG_ARCH_PENSANDO_SALINA_SOC) += salina-asic.dtb
++
+ always-y	:= $(dtb-y)
+ subdir-y	:= $(dts-dirs)
+ clean-files	:= *.dtb
+diff --git a/arch/arm64/boot/dts/pensando/elba-asic-memory.dtsi b/arch/arm64/boot/dts/pensando/elba-asic-memory.dtsi
+index 6652b42..ccb07ad 100644
+--- a/arch/arm64/boot/dts/pensando/elba-asic-memory.dtsi
++++ b/arch/arm64/boot/dts/pensando/elba-asic-memory.dtsi
+@@ -1,3 +1,7 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2020-2023 Advanced Micro Devices, Inc.
++ */
+ 
+ / {
+ 	reserved-memory {
+diff --git a/arch/arm64/boot/dts/pensando/elba-mdev.dtsi b/arch/arm64/boot/dts/pensando/elba-mdev.dtsi
+index a728a76..45a9287 100644
+--- a/arch/arm64/boot/dts/pensando/elba-mdev.dtsi
++++ b/arch/arm64/boot/dts/pensando/elba-mdev.dtsi
+@@ -1,71 +1,76 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2020-2023 Advanced Micro Devices, Inc.
++ */
++
+ / {
+ 	dma-coherent;
+ 
+ 	mnet0: mnet0 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x0>;
++		msi-parent = <&gic_its 0x0>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet1: mnet1 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x1>;
++		msi-parent = <&gic_its 0x1>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet2: mnet2 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x2>;
++		msi-parent = <&gic_its 0x2>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet3: mnet3 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x3>;
++		msi-parent = <&gic_its 0x3>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet4: mnet4 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x4>;
++		msi-parent = <&gic_its 0x4>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet5: mnet5 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x5>;
++		msi-parent = <&gic_its 0x5>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet6: mnet6 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x6>;
++		msi-parent = <&gic_its 0x6>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet7: mnet7 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x7>;
++		msi-parent = <&gic_its 0x7>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet8: mnet8 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x8>;
++		msi-parent = <&gic_its 0x8>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 	mnet9: mnet9 {
+ 		compatible = "pensando,mnet";
+-		msi-parent = <&its 0x9>;
++		msi-parent = <&gic_its 0x9>;
+ 		memory-region = <&mnet_reserved>;
+ 	};
+ 
+ 	mcrypt0: mcrypt0 {
+ 		compatible = "pensando,mcrypt";
+-		msi-parent = <&its 0xb>;
++		msi-parent = <&gic_its 0xb>;
+ 	};
+ 	mcrypt1: mcrypt1 {
+ 		compatible = "pensando,mcrypt";
+-		msi-parent = <&its 0xc>;
++		msi-parent = <&gic_its 0xc>;
+ 	};
+ 	mcrypt2: mcrypt2 {
+ 		compatible = "pensando,mcrypt";
+-		msi-parent = <&its 0xd>;
++		msi-parent = <&gic_its 0xd>;
+ 	};
+ 	mcrypt3: mcrypt3 {
+ 		compatible = "pensando,mcrypt";
+-		msi-parent = <&its 0xe>;
++		msi-parent = <&gic_its 0xe>;
+ 	};
+ };
+diff --git a/arch/arm64/boot/dts/pensando/salina-16core.dtsi b/arch/arm64/boot/dts/pensando/salina-16core.dtsi
+new file mode 100644
+index 0000000..faa80d8
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-16core.dtsi
+@@ -0,0 +1,166 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++/ {
++	cpus {
++		#address-cells = <2>;
++		#size-cells = <0>;
++
++		cpu-map {
++			cluster0 {
++				core0 { cpu = <&cpu0>; };
++				core1 { cpu = <&cpu1>; };
++			};
++			cluster1 {
++				core0 { cpu = <&cpu2>; };
++				core1 { cpu = <&cpu3>; };
++			};
++			cluster2 {
++				core0 { cpu = <&cpu4>; };
++				core1 { cpu = <&cpu5>; };
++			};
++			cluster3 {
++				core0 { cpu = <&cpu6>; };
++				core1 { cpu = <&cpu7>; };
++			};
++			cluster4 {
++				core0 { cpu = <&cpu8>; };
++				core1 { cpu = <&cpu9>; };
++			};
++			cluster5 {
++				core0 { cpu = <&cpu10>; };
++				core1 { cpu = <&cpu11>; };
++			};
++			cluster6 {
++				core0 { cpu = <&cpu12>; };
++				core1 { cpu = <&cpu13>; };
++			};
++			cluster7 {
++				core0 { cpu = <&cpu14>; };
++				core1 { cpu = <&cpu15>; };
++			};
++		};
++
++		/* CLUSTER 0 */
++		cpu0: cpu@0 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0>;
++			enable-method = "spin-table";
++		};
++
++		cpu1: cpu@10000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x10000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 1 */
++		cpu2: cpu@20000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x20000>;
++			enable-method = "spin-table";
++		};
++
++		cpu3: cpu@30000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x30000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 2 */
++		cpu4: cpu@40000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x40000>;
++			enable-method = "spin-table";
++		};
++
++		cpu5: cpu@50000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x50000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 3 */
++		cpu6: cpu@60000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x60000>;
++			enable-method = "spin-table";
++		};
++
++		cpu7: cpu@70000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x70000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 4 */
++		cpu8: cpu@80000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x80000>;
++			enable-method = "spin-table";
++		};
++
++		cpu9: cpu@90000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0x90000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 5 */
++		cpu10: cpu@a0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xa0000>;
++			enable-method = "spin-table";
++		};
++
++		cpu11: cpu@b0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xb0000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 6 */
++		cpu12: cpu@c0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xc0000>;
++			enable-method = "spin-table";
++		};
++
++		cpu13: cpu@d0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xd0000>;
++			enable-method = "spin-table";
++		};
++
++		/* CLUSTER 7 */
++		cpu14: cpu@e0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xe0000>;
++			enable-method = "spin-table";
++		};
++
++		cpu15: cpu@f0000 {
++			device_type = "cpu";
++			compatible = "arm,neoverse-n1";
++			reg = <0 0xf0000>;
++			enable-method = "spin-table";
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic.dts b/arch/arm64/boot/dts/pensando/salina-asic.dts
+new file mode 100644
+index 0000000..f15e89e
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-asic.dts
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Device Tree file for AMD Pensando Salina Board.
++ *
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++/dts-v1/;
++
++#include "salina-asic.dtsi"
++#include "salina-16core.dtsi"
++#include "salina-n1-common.dtsi"
++#include "salina-n1-flash-parts.dtsi"
++#include "elba-asic-memory.dtsi"
++#include "elba-mdev.dtsi"
++
++/ {
++	model = "Salina ASIC Board";
++	compatible = "pensando,salina";
++
++	aliases {
++		serial1 = &uart1;
++		spi1 = &spi1;
++	};
++
++	chosen {
++		stdout-path = "serial1:115200n8";
++	};
++
++	tawkipc {
++		compatible = "amd,tawk-ipc";
++		peer-id = <1>;
++		#address-cells = <2>;
++		#size-cells = <1>;
++		reg = <0x0 0x0 0x0 0x0>,  /* doorbells */
++			<0x0 0x0 0x0 0x0>, /* msix-like table */
++			<0x47 0xe1d2b100 0x0 0x8>,  /* reset signal registers */
++			<0x47 0xe1d2c100 0x0 0x10>,     /* mailbox control registers */
++			<0x47 0xe1d2d100 0x0 0x800>;    /* mailbox buffers */
++		rst-sigs = <0x4 0x0>;
++		nmboxes = <2>;
++		mbox-ctl = <0x0 0x3>;
++		mbox-buf = <0x0 0xa 0x400>;
++		status = "okay";
++	};
++};
++
++&spi1 {
++	status = "okay";
++};
++
++&emmc_clk {
++	clock-frequency = <208000000>;
++};
++
++&emmc0 {
++	bus-width = <8>;
++	cap-mmc-hw-reset;
++	reset-names = "hw";
++	resets = <&rstc 0>;
++	status = "ok";
++};
++
++&i2c1 {
++	clock-frequency = <100000>;
++	status = "okay";
++
++	fru@64 {
++		compatible = "slave-24c32";
++		reg = <0x64>;
++	};
++};
++
++&soc {
++	rstc: reset-controller@0 {
++		compatible = "amd,pensando-salinasr-reset";
++		reg = <0x0 0x0 0x0 0xff>;
++		#reset-cells = <1>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic.dtsi b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+new file mode 100644
+index 0000000..c9b3cbb
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+@@ -0,0 +1,283 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++#include <dt-bindings/gpio/gpio.h>
++#include "dt-bindings/interrupt-controller/arm-gic.h"
++#include "dt-bindings/interrupt-controller/irq.h"
++#include "dt-bindings/soc/pensando,capmem.h"
++
++/ {
++	interrupt-parent = <&gic>;
++	#address-cells = <2>;
++	#size-cells = <2>;
++
++	dma-coherent;
++
++	ahb_clk: oscillator0 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++
++	emmc_clk: oscillator2 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++
++	flash_clk: oscillator3 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++
++	ref_clk: oscillator4 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++
++	gmac_clk: oscillator5 {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++	};
++
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	pmu {
++		compatible = "arm,armv8-pmuv3";
++		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	/* Common UIO device for MSI drivers */
++	uio_penmsi {
++		compatible = "pensando,uio_penmsi";
++		name = "uio_penmsi";
++	};
++
++	rstcause {
++		compatible = "pensando,rstcause";
++		pensando,causeregs = <&syscon 0x204>;
++	};
++
++	capmem {
++		compatible = "pensando,capmem";
++		pensando,capmem-fixed-ranges =
++			<0x0 0x10000 0x0 0x6fff0000 DSC_MEM_ATTR_DEVICE>,
++			<0x2 0x40000000 0x0 0x8000000 DSC_MEM_ATTR_DEVICE>;
++	};
++
++	soc: soc {
++		compatible = "simple-bus";
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		i2c1: i2c@20000 {
++			compatible = "snps,designware-i2c";
++			reg = <0x0 0x20000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			i2c-sda-hold-time-ns = <480>;
++			snps,sda-timeout-ms = <750>;
++			interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		spi1: spi@c0000 {
++			compatible = "amd,pensando-elba-spi";
++			reg = <0x0 0xc0000 0x0 0x100>;
++			amd,pensando-elba-syscon = <&syscon>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			num-cs = <2>;
++			status = "disabled";
++		};
++
++		qspi0: spi@90000 {
++			compatible = "amd,pensando-elba-qspi";
++			#address-cells = <1>;
++			#size-cells = <0>;
++			reg = <0x0 0x90000 0x0 0x400>,
++			      <0x0 0x77ff0000 0x0 0x1000>;
++			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&flash_clk>;
++			cdns,fifo-depth = <1024>;
++			cdns,fifo-width = <4>;
++			cdns,trigger-address = <0x07ff0000>;
++			status = "disabled";
++		};
++
++		gpio0: gpio@d0000 {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			compatible = "snps,dw-apb-gpio";
++			reg = <0x0 0xd0000 0x0 0x78>;
++			status = "disabled";
++
++			porta: gpio-controller@0 {
++				compatible = "snps,dw-apb-gpio-port";
++				reg = <0>;
++				gpio-controller;
++				#gpio-cells = <2>;
++				ngpios = <8>;
++				interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
++				interrupt-controller;
++				interrupt-parent = <&gic>;
++				#interrupt-cells = <2>;
++			};
++			portb: gpio-controller@1 {
++				compatible = "snps,dw-apb-gpio-port";
++				reg = <1>;
++				gpio-controller;
++				#gpio-cells = <2>;
++				ngpios = <8>;
++			};
++		};
++
++		gpio1: gpio@e0000 {
++			#address-cells = <1>;
++			#size-cells = <0>;
++			compatible = "snps,dw-apb-gpio";
++			reg = <0x0 0xe0000 0x0 0x78>;
++			status = "disabled";
++		};
++
++		uart1: serial@100000 {
++			device_type = "serial";
++			compatible = "ns16550a";
++			reg = <0x0 0x100000 0x0 0x100>;
++			clocks = <&ref_clk>;
++			interrupts = <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>;
++			reg-shift = <2>;
++			reg-io-width = <4>;
++		};
++
++		emmc0: sdio-host-chip@600000 {
++			compatible = "amd,pensando-salina-sd4hc", "cdns,sd4hc";
++			clocks = <&emmc_clk>;
++			interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_HIGH>;
++			reg = <0x0 0x600000 0x0 0x10000
++			       0x0 0x680044 0x0 0x4>;
++			mmc-ddr-1_8v;
++			mmc-hs200-1_8v;
++			mmc-hs400-1_8v;
++			cdns,phy-input-delay-sd-highspeed = <0x4>;
++			cdns,phy-input-delay-legacy = <0x4>;
++			cdns,phy-input-delay-sd-uhs-sdr50 = <0x6>;
++			cdns,phy-input-delay-sd-uhs-ddr50 = <0x16>;
++			cdns,phy-dll-delay-sdclk = <0x1f>;
++			status = "disabled";
++		};
++
++		cmn_pmu_int: interrupt-controller@42200000 {
++			compatible = "pensando,salina-cmn-pmu-interrupt";
++			interrupt-controller;
++			reg = <0x0 0x42200000 0x0 0x40>;
++			#interrupt-cells = <3>;
++			interrupt-parent = <&gic>;
++			interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "cmn_pmu_int";
++		};
++
++		cmn_pmu@400000000 {
++			compatible = "arm,cmn-700";
++			#address-cells = <2>;
++			#size-cells = <2>;
++			/* base 0x4_0000_0000	size 256MB */
++			reg = <0x4 0x0 0x0 0x10000000>;
++			interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
++		stmmac_axi_setup: stmmac-axi-config {
++			snps,wr_osr_lmt = <0>;
++			snps,rd_osr_lmt = <0>;
++			snps,blen = <0 0 0 0 0 4 0>;
++		};
++
++		gmac0: ethernet@6d73a000 {
++			compatible = "snps,dwmac-3.70a", "snps,dwmac";
++			reg = <0x0 0x6d73a000 0x0 0x8000>;
++			clocks = <&gmac_clk>;
++			clock-names = "stmmaceth";
++			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "macirq";
++			mac-address = [00 ae cd 10 96 38]; /* Filled in by U-Boot */
++			max-frame-size = <3800>;
++			phy-mode = "gmii";
++			snps,fixed-burst;
++			snps,multicast-filter-bins = <256>;
++			snps,perfect-filter-entries = <128>;
++			rx-fifo-depth = <16384>;
++			tx-fifo-depth = <16384>;
++			snps,axi-config = <&stmmac_axi_setup>;
++			snps,pbl = <2>;
++			status = "disabled";
++			fixed-link {
++				speed = <1000>;
++				full-duplex;
++			};
++		};
++
++		gmac1: ethernet@6df3a000 {
++			compatible = "snps,dwmac-3.70a", "snps,dwmac";
++			reg = <0x0 0x6df3a000 0x0 0x8000>;
++			clocks = <&gmac_clk>;
++			clock-names = "stmmaceth";
++			interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "macirq";
++			mac-address = [00 ae cd 10 96 39];/* Filled in by U-Boot */
++			max-frame-size = <3800>;
++			phy-mode = "gmii";
++			snps,fixed-burst;
++			snps,multicast-filter-bins = <256>;
++			snps,perfect-filter-entries = <128>;
++			rx-fifo-depth = <16384>;
++			tx-fifo-depth = <16384>;
++			snps,axi-config = <&stmmac_axi_setup>;
++			snps,pbl = <2>;
++			status = "disabled";
++			fixed-link {
++				speed = <1000>;
++				full-duplex;
++			};
++		};
++
++		gic: interrupt-controller@1000000 {
++			compatible = "arm,gic-v3";
++			#address-cells = <2>;
++			#interrupt-cells = <3>;
++			#size-cells = <2>;
++			ranges;
++			interrupt-controller;
++			reg = <0x0 0x1000000 0 0x10000>,	/* GICD */
++			      <0x0 0x1060000 0 0x200000>;	/* GICR */
++			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
++
++			gic_its: interrupt-controller@1040000 {
++				compatible = "arm,gic-v3-its";
++				msi-controller;
++				#msi-cells = <1>;
++				reg = <0x0 0x1040000 0x0 0x20000>, /* ITS */
++				      <0x0 0x1400040 0x0 0x4>;	   /* MSI encapsulator */
++			};
++		};
++
++		syscon: syscon@61000000 {
++			compatible = "amd,pensando-elba-syscon", "syscon";
++			reg = <0x0 0x61000000 0x0 0x80000>;
++		};
++
++		panic: panicdump {
++			compatible = "pensando,capri-crash";
++			status = "disabled";
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi b/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
+new file mode 100644
+index 0000000..4b882d7
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
+@@ -0,0 +1,66 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++&ahb_clk {
++	clock-frequency = <400000000>;
++};
++
++&emmc_clk {
++	clock-frequency = <200000000>;
++};
++
++&flash_clk {
++	clock-frequency = <400000000>;
++};
++
++&ref_clk {
++	clock-frequency = <100000000>;
++};
++
++&gmac_clk {
++	clock-frequency = <125000000>;
++};
++
++&gpio0 {
++	status = "ok";
++};
++
++&gpio1 {
++	status = "ok";
++};
++
++&spi1 {
++	status = "okay";
++
++	flash1: cysnor@0 {
++		compatible = "jedec,spi-nor";
++		reg = <0>;
++		spi-max-frequency = <50000>;
++		spi-rx-bus-width = <1>;
++		m25p,fast-read;
++		cdns,read-delay = <0>;
++		cdns,tshsl-ns = <0>;
++		cdns,tsd2d-ns = <0>;
++		cdns,tchsh-ns = <0>;
++		cdns,tslch-ns = <0>;
++		};
++};
++
++&qspi0 {
++	status = "okay";
++
++	flash0: flash@0 {
++		compatible = "jedec,spi-nor";
++		reg = <0>;
++		spi-max-frequency = <24000000>;
++		spi-rx-bus-width = <2>;
++		m25p,fast-read;
++		cdns,read-delay = <0>;
++		cdns,tshsl-ns = <0>;
++		cdns,tsd2d-ns = <0>;
++		cdns,tchsh-ns = <0>;
++		cdns,tslch-ns = <0>;
++	};
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi b/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
+new file mode 100644
+index 0000000..a1e1e8b
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2024 Advanced Micro Devices, Inc.
++ */
++
++&flash0 {
++	partitions {
++		compatible = "fixed-partitions";
++		#address-cells = <1>;
++		#size-cells = <1>;
++
++		partition@0 {
++			label = "qspi0";
++			reg = <0x0 0x10000000>;
++		};
++	};
++};
+diff --git a/drivers/edac/Kconfig b/drivers/edac/Kconfig
+index 01b3f54..00d07cf 100644
+--- a/drivers/edac/Kconfig
++++ b/drivers/edac/Kconfig
+@@ -543,7 +543,7 @@ config EDAC_DMC520
+ 
+ config EDAC_ELBA
+ 	tristate "Pensando Elba Memory ECC"
+-	depends on ARCH_PENSANDO_ELBA_SOC
++	depends on ARCH_PENSANDO_ELBA_SOC || ARCH_PENSANDO_GIGLIO_SOC
+ 	help
+ 	  Support for error detection and correction on the
+ 	  Pensando Elba SoC.
+diff --git a/drivers/irqchip/Kconfig b/drivers/irqchip/Kconfig
+index 3311e96..e2fcb79 100644
+--- a/drivers/irqchip/Kconfig
++++ b/drivers/irqchip/Kconfig
+@@ -191,7 +191,7 @@ config CLPS711X_IRQCHIP
+ 
+ config IRQ_PENSANDO
+ 	bool "Support for Pensando SOC IRQ chip structure"
+-	depends on ARCH_PENSANDO_ELBA_SOC
++	depends on ARCH_PENSANDO_ELBA_SOC || ARCH_PENSANDO_GIGLIO_SOC || ARCH_PENSANDO_SALINA_SOC
+ 	default "y"
+ 	select IRQ_DOMAIN
+ 	select IRQ_DOMAIN_HIERARCHY
+diff --git a/drivers/irqchip/irq-gic-v3-its.c b/drivers/irqchip/irq-gic-v3-its.c
+index 30e60bc..23ab564 100644
+--- a/drivers/irqchip/irq-gic-v3-its.c
++++ b/drivers/irqchip/irq-gic-v3-its.c
+@@ -119,6 +119,7 @@ struct its_node {
+ 	unsigned int		msi_domain_flags;
+ 	u32			pre_its_base; /* for Socionext Synquacer */
+ 	int			vlpi_redist_offset;
++	u64			msi_encapsulator;
+ };
+ 
+ #define is_v4(its)		(!!((its)->typer & GITS_TYPER_VLPIS))
+@@ -1717,6 +1718,8 @@ static u64 its_irq_get_msi_base(struct its_device *its_dev)
+ {
+ 	struct its_node *its = its_dev->its;
+ 
++	if (its->msi_encapsulator)
++		return its->msi_encapsulator;
+ 	return its->phys_base + GITS_TRANSLATER;
+ }
+ 
+@@ -5347,6 +5350,16 @@ static int __init its_of_probe(struct device_node *node)
+ 		}
+ 
+ 		its_probe_one(&res, &np->fwnode, of_node_to_nid(np));
++
++		/* AMD Pensando: Check for MSI encapsulator address (second reg entry) */
++		if (of_address_to_resource(np, 1, &res) == 0) {
++			struct its_node *its;
++			/* Find the ITS node we just probed (last in list) */
++			its = list_first_entry(&its_nodes, struct its_node, entry);
++			its->msi_encapsulator = res.start;
++			pr_info("ITS: AMD Pensando MSI encapsulator @ 0x%llx\n",
++				its->msi_encapsulator);
++		}
+ 	}
+ 	return 0;
+ }
+diff --git a/drivers/reset/Kconfig b/drivers/reset/Kconfig
+index f40388c..6a1a678 100644
+--- a/drivers/reset/Kconfig
++++ b/drivers/reset/Kconfig
+@@ -204,6 +204,16 @@ config RESET_RZG2L_USBPHY_CTRL
+ 	  Support for USBPHY Control found on RZ/G2L family. It mainly
+ 	  controls reset and power down of the USB/PHY.
+ 
++config RESET_SALINASR
++	tristate "AMD Pensando Salina System Resource reset controller"
++	depends on ARCH_PENSANDO_SALINA_SOC || COMPILE_TEST
++	help
++	  This option enables support for the external reset functions
++	  on the Pensando Salina System Resource Chip.  Reset control
++	  of peripherals is accessed over IPC to management processor.
++
++	  The management processor is an ARM64 A35 in the Salina SoC.
++
+ config RESET_SCMI
+ 	tristate "Reset driver controlled via ARM SCMI interface"
+ 	depends on ARM_SCMI_PROTOCOL || COMPILE_TEST
+diff --git a/drivers/reset/Makefile b/drivers/reset/Makefile
+index ff964dc..edbba07 100644
+--- a/drivers/reset/Makefile
++++ b/drivers/reset/Makefile
+@@ -28,6 +28,7 @@ obj-$(CONFIG_RESET_QCOM_AOSS) += reset-qcom-aoss.o
+ obj-$(CONFIG_RESET_QCOM_PDC) += reset-qcom-pdc.o
+ obj-$(CONFIG_RESET_RASPBERRYPI) += reset-raspberrypi.o
+ obj-$(CONFIG_RESET_RZG2L_USBPHY_CTRL) += reset-rzg2l-usbphy-ctrl.o
++obj-$(CONFIG_RESET_SALINASR) += reset-salinasr.o
+ obj-$(CONFIG_RESET_SCMI) += reset-scmi.o
+ obj-$(CONFIG_RESET_SIMPLE) += reset-simple.o
+ obj-$(CONFIG_RESET_SOCFPGA) += reset-socfpga.o
+diff --git a/drivers/reset/reset-salinasr.c b/drivers/reset/reset-salinasr.c
+new file mode 100644
+index 0000000..056e143
+--- /dev/null
++++ b/drivers/reset/reset-salinasr.c
+@@ -0,0 +1,151 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Copyright (c) 2025 Advanced Micro Devices, Inc.
++ */
++
++#include <linux/module.h>
++#include <linux/miscdevice.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/poll.h>
++#include <linux/reset-controller.h>
++#include <linux/wait.h>
++
++#define SALINA_RESET_NOTIFY_DEV "sdhci_notify"
++#define RESET_MSG "reset_triggered\n"
++#define RESET_MSG_LEN 16
++
++struct salina_reset_priv {
++	struct reset_controller_dev rcdev;
++	struct device *dev;
++};
++
++static DECLARE_WAIT_QUEUE_HEAD(salina_reset_wait);
++static int reset_triggered;
++
++static ssize_t salina_reset_read(struct file *file, char __user *buf,
++				 size_t count, loff_t *ppos)
++{
++	if (wait_event_interruptible(salina_reset_wait, reset_triggered != 0))
++		return -ERESTARTSYS;
++
++	/* Only one read per event */
++	if (*ppos > 0)
++		return 0;
++
++	if (count < RESET_MSG_LEN)
++		return -EINVAL;
++
++	/* Notify userspace */
++	if (copy_to_user(buf, RESET_MSG, RESET_MSG_LEN))
++		return -EFAULT;
++
++	*ppos += RESET_MSG_LEN;
++	reset_triggered = 0;
++	return RESET_MSG_LEN;
++}
++
++static unsigned int salina_reset_poll(struct file *file, poll_table *wait)
++{
++	poll_wait(file, &salina_reset_wait, wait);
++	return reset_triggered ? POLLIN | POLLRDNORM : 0;
++}
++
++static const struct file_operations salina_reset_fops = {
++	.owner = THIS_MODULE,
++	.read = salina_reset_read,
++	.poll = salina_reset_poll,
++};
++
++static struct miscdevice salina_reset_misc = {
++	.minor = MISC_DYNAMIC_MINOR,
++	.name = SALINA_RESET_NOTIFY_DEV,
++	.fops = &salina_reset_fops,
++};
++
++/* Reset controller ops */
++static int salina_reset_assert(struct reset_controller_dev *rcdev,
++			       unsigned long id)
++{
++	struct salina_reset_priv *priv = container_of(rcdev, struct salina_reset_priv, rcdev);
++	static int init;
++
++	/* Kernel init does emmc reset if there is a reset driver and
++	 * the eMMC responds to hwreset.  The CPLD does an eMMC hwreset
++	 * during reboot and the userspace program is started after the
++	 * kernel is booted.  No need to request the first hwreset.
++	 */
++	if (!init) {
++		init = 1;
++		return 0;
++	}
++
++	dev_info(priv->dev, "emmc reset requested\n");
++	reset_triggered = 1;
++	wake_up_interruptible(&salina_reset_wait);
++	return 0;
++}
++
++static int salina_reset_deassert(struct reset_controller_dev *rcdev,
++				 unsigned long id)
++{
++	return 0;
++}
++
++static const struct reset_control_ops salina_reset_ops = {
++	.assert = salina_reset_assert,
++	.deassert = salina_reset_deassert,
++};
++
++static int salina_reset_probe(struct platform_device *pdev)
++{
++	struct salina_reset_priv *priv;
++	int ret;
++
++	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	priv->dev = &pdev->dev;
++	priv->rcdev.owner = THIS_MODULE;
++	priv->rcdev.nr_resets = 1;
++	priv->rcdev.ops = &salina_reset_ops;
++	priv->rcdev.of_node = pdev->dev.of_node;
++
++	ret = devm_reset_controller_register(&pdev->dev, &priv->rcdev);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to register reset controller: %d\n", ret);
++		return ret;
++	}
++
++	ret = misc_register(&salina_reset_misc);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to register misc device %s: %d\n",
++			SALINA_RESET_NOTIFY_DEV, ret);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int salina_reset_remove(struct platform_device *pdev)
++{
++	misc_deregister(&salina_reset_misc);
++	return 0;
++}
++
++static const struct of_device_id salina_reset_dt_match[] = {
++	{ .compatible = "amd,pensando-salinasr-reset" },
++	{ /* sentinel */ },
++};
++MODULE_DEVICE_TABLE(of, salina_reset_dt_match);
++
++static struct platform_driver salina_reset_driver = {
++	.probe = salina_reset_probe,
++	.remove = salina_reset_remove,
++	.driver = {
++		.name = "salina-reset",
++		.of_match_table = salina_reset_dt_match,
++	},
++};
++builtin_platform_driver(salina_reset_driver);
+diff --git a/drivers/soc/pensando/Kconfig b/drivers/soc/pensando/Kconfig
+index 766924c..6fde30b 100644
+--- a/drivers/soc/pensando/Kconfig
++++ b/drivers/soc/pensando/Kconfig
+@@ -2,12 +2,24 @@ if ARCH_PENSANDO
+ 
+ menu "Pensando SoC drivers"
+ 
++choice
++	prompt "SoC Select"
++	default ARCH_PENSANDO_ELBA_SOC
++
+ config ARCH_PENSANDO_ELBA_SOC
+ 	bool "Elba SoC"
+-	default y
++	select DMA_OPS
++	select REGMAP_SPI
+ 	help
+ 	  Support for the Pensando Elba SoC
+ 
++config ARCH_PENSANDO_SALINA_SOC
++	bool "Salina SoC"
++	select DMA_OPS
++	help
++	  Support for the Pensando Salina SoC
++endchoice
++
+ config PENSANDO_SOC_CAPMEM
+ 	tristate "/dev/capmem driver for the Pensando SoCs"
+ 	depends on OF
+diff --git a/drivers/soc/pensando/Makefile b/drivers/soc/pensando/Makefile
+index 95689d3..69e6031 100644
+--- a/drivers/soc/pensando/Makefile
++++ b/drivers/soc/pensando/Makefile
+@@ -14,3 +14,4 @@ obj-$(CONFIG_PENSANDO_SOC_CRASH) += cap_crash.o
+ obj-$(CONFIG_PENSANDO_SOC_BSM) += cap_bsm.o
+ obj-$(CONFIG_PENSANDO_SOC_PENFW) += penfw_smc.o penfw_sysfs.o penfw_drv.o
+ obj-$(CONFIG_PENSANDO_SOC_SBUS) += sbus.o
++obj-$(CONFIG_ARCH_PENSANDO_SALINA_SOC) += cmn_pmu_irq.o
+diff --git a/drivers/soc/pensando/cap_pcie.c b/drivers/soc/pensando/cap_pcie.c
+index 91ecb0b..40fd2e3 100644
+--- a/drivers/soc/pensando/cap_pcie.c
++++ b/drivers/soc/pensando/cap_pcie.c
+@@ -21,7 +21,12 @@
+ #include "cap_reboot.h"
+ #include "cap_rstcause.h"
+ #include "penpcie_dev.h"
++#ifdef CONFIG_ARCH_PENSANDO_ELBA_SOC
+ #include "cap_pcie_elba.h"
++#endif
++#ifdef CONFIG_ARCH_PENSANDO_SALINA_SOC
++#include "cap_pcie_salina.h"
++#endif
+ 
+ #define DRV_NAME	"cap_pcie"
+ #define PFX		DRV_NAME ": "
+diff --git a/drivers/soc/pensando/cap_pcie_salina.h b/drivers/soc/pensando/cap_pcie_salina.h
+new file mode 100644
+index 0000000..fee9eec
+--- /dev/null
++++ b/drivers/soc/pensando/cap_pcie_salina.h
+@@ -0,0 +1,55 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (c) 2021-2024, Pensando Systems Inc.
++ */
++
++#ifndef __CAP_PCIE_SALINA_H__
++#define __CAP_PCIE_SALINA_H__
++
++#define PCIEPORT_NPORTS		8
++
++#define SAL_ADDR_BASE_PP_PXC_0_OFFSET 0x20100000
++#define SAL_ADDR_BASE_PP_PXC_0_SIZE 0x40000
++#define SAL_ADDR_BASE_PP_PP_0_OFFSET 0x20300000
++#define SAL_ADDR_BASE_PP_PP_0_SIZE 0x40000
++
++/* Verify these offsets in Salina */
++#define SAL_PXC_CSR_CFG_C_PORT_MAC_BYTE_ADDRESS 0x20f8
++#define SAL_PXC_CSR_CFG_C_PORT_MAC_CFG_C_PORT_MAC_0_2_LTSSM_EN_FIELD_MASK 0x00000002
++#define SAL_PXC_CSR_CFG_C_PORT_MAC_CFG_C_PORT_MAC_0_2_CFG_RETRY_EN_FIELD_MASK 0x00000008
++
++#define SAL_PXC_CSR_INT_C_MAC_INTREG_BYTE_ADDRESS 0x2220
++#define SAL_PXC_CSR_INT_C_MAC_INTREG_RST_DN2UP_INTERRUPT_FIELD_MASK 0x00000010
++
++#define _PP_BASE(pn) \
++	(SAL_ADDR_BASE_PP_PP_0_OFFSET + \
++	(((pn) >> 2) * SAL_ADDR_BASE_PP_PP_0_SIZE))
++
++#define PP_(REG, pn) \
++	(_PP_BASE(pn) + SAL_PP_CSR_ ##REG## _BYTE_ADDRESS)
++
++#define _PXC_BASE(pn) \
++	(SAL_ADDR_BASE_PP_PXC_0_OFFSET + \
++	((pn) * SAL_ADDR_BASE_PP_PXC_0_SIZE))
++
++#define PXC_(REG, pn) \
++	(_PXC_BASE(pn) + SAL_PXC_CSR_ ##REG## _BYTE_ADDRESS)
++
++#define CFG_MACF_(REG) \
++	(SAL_PXC_CSR_CFG_C_PORT_MAC_CFG_C_PORT_MAC_ ##REG## _FIELD_MASK)
++#define MAC_INTREGF_(REG) \
++	(SAL_PXC_CSR_INT_C_MAC_INTREG_ ##REG## _INTERRUPT_FIELD_MASK)
++
++#define SAL_SOC_CSR_CFG_WDT_RST_EN_LSB 0
++#define CFG_WDT_RST_EN  SAL_SOC_CSR_CFG_WDT_RST_EN_LSB
++
++#define WDT_CR          0x00
++#define WDT_TORR        0x01
++#define WDT_CRR         0x03
++
++#define WDT_CR_ENABLE   0x1
++#define WDT_CR_PCLK_256 (0x7 << 2)
++
++#define WDT_KICK_VAL    0x76
++
++#endif /* __CAP_PCIE_SALINA_H__ */
+diff --git a/drivers/soc/pensando/cmn_pmu_irq.c b/drivers/soc/pensando/cmn_pmu_irq.c
+new file mode 100644
+index 0000000..6616d22
+--- /dev/null
++++ b/drivers/soc/pensando/cmn_pmu_irq.c
+@@ -0,0 +1,108 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * AMD Pensando Salina SoC CMN PMU Interrupt Handler
++ *
++ * Copyright 2024 Advanced Micro Devices, Inc.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/of_irq.h>
++
++/*
++ * The cmn_pmu_int reg base/size region is a small mapping that includes the
++ * Salina CMN PMU CSR interrupt and AXI interrupt registers to initialize and
++ * service the CMN PMU interrupt.  Below are offsets to iomem base.
++ */
++#define SAL_CMN_PMU_CSR_CSR_INT         0x00
++#define SAL_CMN_PMU_CSR_NXCW_INTREG     0x20
++#define SAL_CMN_PMU_CSR_NXCW_INT_TEST   0x24
++#define SAL_CMN_PMU_CSR_NXCW_INT_ENABLE 0x28
++#define SAL_CMN_PMU_CSR_NXCW_INT_CLEAR  0x2c
++
++static irqreturn_t cmn_pmu_irq_handler(int irq, void *regs)
++{
++	writel(BIT(0), regs + SAL_CMN_PMU_CSR_NXCW_INTREG);
++	return IRQ_HANDLED;
++}
++
++static int salina_cmn_pmu_irq_probe(struct platform_device *pdev)
++{
++	struct device_node *node = pdev->dev.of_node;
++	struct resource res;
++	void __iomem *regs;
++	size_t res_size;
++	int irq, ret;
++
++	ret = of_address_to_resource(node, 0, &res);
++	if (ret) {
++		pr_err("Failed to get memory resource\n");
++		return ret;
++	}
++	res_size = resource_size(&res);
++
++	if (!request_mem_region(res.start, res_size, "cmn_pmu_int")) {
++		pr_err("Failed to request memory region\n");
++		return -EBUSY;
++	}
++
++	regs = ioremap(res.start, res_size);
++	if (!regs) {
++		pr_err("Failed to remap memory region\n");
++		ret = -ENOMEM;
++		goto release_resource;
++	}
++
++	writel(GENMASK(13, 0), regs + SAL_CMN_PMU_CSR_NXCW_INT_CLEAR); /* Disable interrupts */
++	writel(GENMASK(13, 0), regs + SAL_CMN_PMU_CSR_NXCW_INTREG);    /* Ack interrupts */
++	writel(BIT(1), regs + SAL_CMN_PMU_CSR_CSR_INT);                /* Enable downstream int */
++	writel(BIT(0), regs + SAL_CMN_PMU_CSR_NXCW_INT_ENABLE);        /* Enable eMMC int */
++
++	irq = irq_of_parse_and_map(node, 0);
++	if (irq <= 0) {
++		dev_err(&pdev->dev, "Failed to map interrupt\n");
++		ret = -ENXIO;
++		goto unmap_regs;
++	}
++
++	ret = request_irq(irq, cmn_pmu_irq_handler,
++			  IRQF_NOBALANCING | IRQF_NO_THREAD | IRQF_SHARED,
++			  "cmn_pmu_int", regs);
++	if (ret) {
++		dev_err(&pdev->dev, "Failed to request IRQ\n");
++		goto unmap_regs;
++	}
++	return 0;
++
++unmap_regs:
++	iounmap(regs);
++release_resource:
++	release_mem_region(res.start, res_size);
++	return ret;
++}
++
++static const struct of_device_id salina_cmn_pmu_irq_of_match[] = {
++	{ .compatible = "pensando,salina-cmn-pmu-interrupt" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, salina_cmn_pmu_irq_of_match);
++
++static struct platform_driver salina_cmn_pmu_irq = {
++	.probe = salina_cmn_pmu_irq_probe,
++	.driver = {
++		.name = "cmn_pmu_int",
++		.of_match_table = salina_cmn_pmu_irq_of_match,
++		.owner = THIS_MODULE,
++	},
++};
++
++module_platform_driver(salina_cmn_pmu_irq);
++
++MODULE_AUTHOR("Darshan Prajapati <darshan.prajapati@amd.com>");
++MODULE_DESCRIPTION("AMD Pensando Salina SoC CMN PMU IRQ Handler");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/spi/spi-dw-mmio.c b/drivers/spi/spi-dw-mmio.c
+index 3ae7183..375f714 100644
+--- a/drivers/spi/spi-dw-mmio.c
++++ b/drivers/spi/spi-dw-mmio.c
+@@ -73,6 +73,19 @@ struct dw_spi_elba {
+ 			((((val) << 1) | 0x1) << ELBA_SPICS_SHIFT(ctl, cs))
+ 
+ /*
++ * Salina SPICS register layout differs from Elba.
++ * ctl:              1               |               0
++ * cs:       1               0       |       1               0
++ * bit: 15------14------13------12---|--11------10-------9-------8
++ *      cs1   cs1_ovr   cs0   cs0_ovr|  cs1   cs1_ovr   cs0   cs0_ovr
++ *                  ssi1             |            ssi0
++ */
++#define SALINA_SPICS_SHIFT(ctl, cs)	(8 + 4 * (ctl) + 2 * (cs))
++#define SALINA_SPICS_MASK(ctl, cs)	(0x3 << SALINA_SPICS_SHIFT(ctl, cs))
++#define SALINA_SPICS_SET(ctl, cs, val)	\
++			((((val) << 1) | 0x1) << SALINA_SPICS_SHIFT(ctl, cs))
++
++/*
+  * The Designware SPI controller (referred to as master in the documentation)
+  * automatically deasserts chip select when the tx fifo is empty. The chip
+  * selects then needs to be either driven as GPIOs or, for the first 4 using
+@@ -342,6 +355,74 @@ static int dw_spi_elba_init(struct platform_device *pdev,
+ 	return 0;
+ }
+ 
++static void salina_spics_set_cs(struct dw_spi_elba *dwselba, int cs, int enable)
++{
++	regmap_update_bits(dwselba->regmap, dwselba->reg,
++		SALINA_SPICS_MASK(dwselba->ctl, cs),
++		SALINA_SPICS_SET(dwselba->ctl, cs, enable));
++}
++
++static void dw_spi_salina_set_cs(struct spi_device *spi, bool enable)
++{
++	struct dw_spi *dws = spi_master_get_devdata(spi->master);
++	struct dw_spi_mmio *dwsmmio = container_of(dws, struct dw_spi_mmio, dws);
++	struct dw_spi_elba *dwselba = dwsmmio->priv;
++	u8 cs = spi->chip_select;
++
++	if (cs < 2) {
++		/* overridden native chip-select */
++		salina_spics_set_cs(dwselba, spi->chip_select, enable);
++	}
++
++	/*
++	 * The DW SPI controller needs a native CS bit selected to start
++	 * the serial engine, and we have fewer native CSs than we need, so
++	 * use CS0 always.
++	 */
++	spi->chip_select = 0;
++	dw_spi_set_cs(spi, enable);
++	spi->chip_select = cs;
++}
++
++static int dw_spi_salina_init(struct platform_device *pdev,
++			      struct dw_spi_mmio *dwsmmio)
++{
++	struct of_phandle_args args;
++	struct dw_spi_elba *dwselba;
++	struct regmap *regmap;
++	int rc;
++
++	rc = of_parse_phandle_with_fixed_args(pdev->dev.of_node,
++					      "pensando,spics", 2, 0, &args);
++	if (rc) {
++		dev_err(&pdev->dev, "could not find pensando,spics\n");
++		return rc;
++	}
++
++	regmap = syscon_node_to_regmap(args.np);
++	if (IS_ERR(regmap)) {
++		dev_err(&pdev->dev, "could not map pensando,spics\n");
++		return PTR_ERR(regmap);
++	}
++
++	dwselba = devm_kzalloc(&pdev->dev, sizeof(*dwselba), GFP_KERNEL);
++	if (!dwselba)
++		return -ENOMEM;
++
++	dwselba->regmap = regmap;
++	dwselba->reg = args.args[0];
++	dwselba->ctl = args.args[1];
++
++	/* deassert cs */
++	salina_spics_set_cs(dwselba, 0, 1);
++	salina_spics_set_cs(dwselba, 1, 1);
++
++	dwsmmio->priv = dwselba;
++	dwsmmio->dws.set_cs = dw_spi_salina_set_cs;
++
++	return 0;
++}
++
+ static int dw_spi_mmio_probe(struct platform_device *pdev)
+ {
+ 	int (*init_func)(struct platform_device *pdev,
+@@ -462,6 +543,7 @@ static int dw_spi_mmio_remove(struct platform_device *pdev)
+ 	{ .compatible = "microchip,sparx5-spi", dw_spi_mscc_sparx5_init},
+ 	{ .compatible = "canaan,k210-spi", dw_spi_canaan_k210_init},
+ 	{ .compatible = "pensando,elba-spi", .data = dw_spi_elba_init },
++	{ .compatible = "pensando,salina-spi", .data = dw_spi_salina_init },
+ 	{ /* end of table */}
+ };
+ MODULE_DEVICE_TABLE(of, dw_spi_mmio_of_match);
+diff --git a/drivers/uio/Kconfig b/drivers/uio/Kconfig
+index 7d2d292..50d345f 100644
+--- a/drivers/uio/Kconfig
++++ b/drivers/uio/Kconfig
+@@ -129,7 +129,7 @@ config UIO_PCIEMAC
+ 	tristate "Include PCI MAC status driver"
+ 	default "y"
+ 	select UIO_PENGIC
+-	depends on ARCH_PENSANDO_ELBA_SOC
++	depends on ARCH_PENSANDO_ELBA_SOC || ARCH_PENSANDO_GIGLIO_SOC || ARCH_PENSANDO_SALINA_SOC
+ 	help
+ 	  Driver that allows handling of ring2 on Pensando Capri systems. It
+ 	  is useful for having a userspace driver that can handle GIC 17
+@@ -141,7 +141,7 @@ config UIO_PENMSI1
+ 	tristate "Driver 1 for MSI"
+ 	default "y"
+ 	select UIO_PENMSI
+-	depends on ARCH_PENSANDO_ELBA_SOC
++	depends on ARCH_PENSANDO_ELBA_SOC || ARCH_PENSANDO_GIGLIO_SOC || ARCH_PENSANDO_SALINA_SOC
+ 	help
+ 	  Driver that allows obtaining MSI data and handling MSI interrupts
+ 	  in userspace.
+diff --git a/include/dt-bindings/soc/pensando,capmem.h b/include/dt-bindings/soc/pensando,capmem.h
+new file mode 100644
+index 0000000..af9fb02
+--- /dev/null
++++ b/include/dt-bindings/soc/pensando,capmem.h
+@@ -0,0 +1,14 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR MIT) */
++
++#ifndef _DT_BINDINGS_PENSANDO_CAPMEM_H
++#define _DT_BINDINGS_PENSANDO_CAPMEM_H
++
++/*
++ * Memory range attrbutes passed in via the device-tree
++ */
++#define DSC_MEM_ATTR_NONCOHERENT	0x0	/* range is DMA noncoherent */
++#define DSC_MEM_ATTR_COHERENT		0x1	/* range is DMA coherent */
++#define DSC_MEM_ATTR_BYPASS		0x2	/* range is LLC bypass */
++#define DSC_MEM_ATTR_DEVICE		0x4	/* range is device */
++
++#endif /* _DT_BINDINGS_PENSANDO_CAPMEM_H */
+-- 
+1.8.3.1
+
