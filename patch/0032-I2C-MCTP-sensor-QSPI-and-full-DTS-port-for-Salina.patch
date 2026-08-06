@@ -1,0 +1,1981 @@
+From 2a456b0b639eba76ff7b01746936d7e6a5900395 Mon Sep 17 00:00:00 2001
+From: Sahil Chaudhari <sahil.chaudhari@amd.com>
+Date: Mon, 13 Jul 2026 12:54:16 +0530
+Subject: [PATCH 32/33] I2C, MCTP, sensor, QSPI, and full DTS port for Salina
+
+Signed-off-by: Sahil Chaudhari <sahil.chaudhari@amd.com>
+---
+ .../pensando/salina-16core-spin-table.dtsi    |  53 +++
+ .../boot/dts/pensando/salina-16core.dtsi      |  16 -
+ .../boot/dts/pensando/salina-asic-common.dtsi |  93 +++++
+ arch/arm64/boot/dts/pensando/salina-asic.dts  |  40 +-
+ arch/arm64/boot/dts/pensando/salina-asic.dtsi | 107 ++++-
+ .../boot/dts/pensando/salina-n1-common.dtsi   |  82 +++-
+ .../dts/pensando/salina-n1-flash-parts.dtsi   | 187 ++++++++-
+ drivers/i2c/busses/i2c-designware-common.c    |  44 ++
+ drivers/i2c/busses/i2c-designware-core.h      |  16 +-
+ drivers/i2c/busses/i2c-designware-master.c    |  18 +-
+ drivers/i2c/busses/i2c-designware-platdrv.c   |  10 +
+ drivers/i2c/busses/i2c-designware-slave.c     |  13 +-
+ drivers/i2c/busses/i2c-rd1173.c               | 382 +++++++++---------
+ drivers/net/mctp/mctp-i2c.c                   |  14 +
+ drivers/spi/spi-cadence-quadspi.c             | 231 ++++++++---
+ 15 files changed, 1002 insertions(+), 304 deletions(-)
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-16core-spin-table.dtsi
+ create mode 100644 arch/arm64/boot/dts/pensando/salina-asic-common.dtsi
+
+diff --git a/arch/arm64/boot/dts/pensando/salina-16core-spin-table.dtsi b/arch/arm64/boot/dts/pensando/salina-16core-spin-table.dtsi
+new file mode 100644
+index 0000000..692056a
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-16core-spin-table.dtsi
+@@ -0,0 +1,53 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++&cpu0 {
++	enable-method = "spin-table";
++};
++&cpu1 {
++	enable-method = "spin-table";
++};
++&cpu2 {
++	enable-method = "spin-table";
++};
++&cpu3 {
++	enable-method = "spin-table";
++};
++&cpu4 {
++	enable-method = "spin-table";
++};
++&cpu5 {
++	enable-method = "spin-table";
++};
++&cpu6 {
++	enable-method = "spin-table";
++};
++&cpu7 {
++	enable-method = "spin-table";
++};
++&cpu8 {
++	enable-method = "spin-table";
++};
++&cpu9 {
++	enable-method = "spin-table";
++};
++&cpu10 {
++	enable-method = "spin-table";
++};
++&cpu11 {
++	enable-method = "spin-table";
++};
++&cpu12 {
++	enable-method = "spin-table";
++};
++&cpu13 {
++	enable-method = "spin-table";
++};
++&cpu14 {
++	enable-method = "spin-table";
++};
++&cpu15 {
++	enable-method = "spin-table";
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-16core.dtsi b/arch/arm64/boot/dts/pensando/salina-16core.dtsi
+index faa80d8..0dc1f25 100644
+--- a/arch/arm64/boot/dts/pensando/salina-16core.dtsi
++++ b/arch/arm64/boot/dts/pensando/salina-16core.dtsi
+@@ -48,14 +48,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu1: cpu@10000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x10000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 1 */
+@@ -63,14 +61,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x20000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu3: cpu@30000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x30000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 2 */
+@@ -78,14 +74,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x40000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu5: cpu@50000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x50000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 3 */
+@@ -93,14 +87,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x60000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu7: cpu@70000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x70000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 4 */
+@@ -108,14 +100,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x80000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu9: cpu@90000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0x90000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 5 */
+@@ -123,14 +113,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xa0000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu11: cpu@b0000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xb0000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 6 */
+@@ -138,14 +126,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xc0000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu13: cpu@d0000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xd0000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		/* CLUSTER 7 */
+@@ -153,14 +139,12 @@
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xe0000>;
+-			enable-method = "spin-table";
+ 		};
+ 
+ 		cpu15: cpu@f0000 {
+ 			device_type = "cpu";
+ 			compatible = "arm,neoverse-n1";
+ 			reg = <0 0xf0000>;
+-			enable-method = "spin-table";
+ 		};
+ 	};
+ };
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic-common.dtsi b/arch/arm64/boot/dts/pensando/salina-asic-common.dtsi
+new file mode 100644
+index 0000000..39d47fd
+--- /dev/null
++++ b/arch/arm64/boot/dts/pensando/salina-asic-common.dtsi
+@@ -0,0 +1,93 @@
++// SPDX-License-Identifier: (GPL-2.0-only or BSD-2-Clause)
++/*
++ * Copyright 2023-2024 Advanced Micro Devices, Inc.
++ */
++
++#include <dt-bindings/i2c/i2c.h>
++#include <dt-bindings/reset/amd,pensando-elba-reset.h>
++
++&spi0 {
++	status = "okay";
++};
++
++&spi1 {
++	status = "okay";
++};
++
++&emmc_clk {
++	clock-frequency = <208000000>;
++};
++
++&emmc0 {
++	bus-width = <8>;
++	cap-mmc-hw-reset;
++	reset-names = "hw";
++	resets = <&rstc EMMC_HW_RESET>;
++	status = "ok";
++};
++
++&i2c1 {
++	clock-frequency = <100000>;
++	status = "disabled";
++};
++
++&i2c2 {
++	clock-frequency = <100000>;
++	status = "okay";
++
++	temp-sensor@4c {
++		compatible = "ti,tmp451";
++		reg = <0x4c>;
++	};
++
++	ina3221@43 {
++		compatible = "ti,ina3221";
++		reg = <0x43>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		input@0 {
++			reg = <0>;
++			label = "P12VDIN";
++			shunt-resistor-micro-ohms = <2000>;
++		};
++
++		input@1 {
++			reg = <1>;
++			label = "V33";
++			shunt-resistor-micro-ohms = <1000>;
++		};
++
++		input@2 {
++			reg = <2>;
++			label = "VDDR";
++			shunt-resistor-micro-ohms = <1000>;
++		};
++	};
++
++	rtc@51 {
++		compatible = "nxp,pcf85263";
++		reg = <0x51>;
++	};
++
++	regulator@60 {
++		compatible = "ti,tps53659";
++		reg = <0x60>;
++	};
++};
++
++&i2c3 {
++	clock-frequency = <100000>;
++	multi-master;
++	mctp-controller;
++	status = "okay";
++
++	mctp@32 {
++		compatible = "mctp-i2c-controller";
++		reg = <(0x32 | I2C_OWN_SLAVE_ADDRESS)>;
++	};
++};
++
++&edac {
++	status = "okay";
++};
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic.dts b/arch/arm64/boot/dts/pensando/salina-asic.dts
+index f15e89e..6aec63a 100644
+--- a/arch/arm64/boot/dts/pensando/salina-asic.dts
++++ b/arch/arm64/boot/dts/pensando/salina-asic.dts
+@@ -9,10 +9,12 @@
+ 
+ #include "salina-asic.dtsi"
+ #include "salina-16core.dtsi"
++#include "salina-16core-spin-table.dtsi"
+ #include "salina-n1-common.dtsi"
+ #include "salina-n1-flash-parts.dtsi"
+ #include "elba-asic-memory.dtsi"
+ #include "elba-mdev.dtsi"
++#include "salina-asic-common.dtsi"
+ 
+ / {
+ 	model = "Salina ASIC Board";
+@@ -20,7 +22,11 @@
+ 
+ 	aliases {
+ 		serial1 = &uart1;
++		spi0 = &spi0;
+ 		spi1 = &spi1;
++		i2c0 = &i2c1;	/* i2c@20000 -> Linux i2c-0 */
++		i2c1 = &i2c2;   /* i2c@30000 -> Linux i2c-1 (Sensors) */
++		i2c2 = &i2c3;   /* i2c@40000 -> Linux i2c-2 (MCTP) */
+ 	};
+ 
+ 	chosen {
+@@ -44,37 +50,3 @@
+ 		status = "okay";
+ 	};
+ };
+-
+-&spi1 {
+-	status = "okay";
+-};
+-
+-&emmc_clk {
+-	clock-frequency = <208000000>;
+-};
+-
+-&emmc0 {
+-	bus-width = <8>;
+-	cap-mmc-hw-reset;
+-	reset-names = "hw";
+-	resets = <&rstc 0>;
+-	status = "ok";
+-};
+-
+-&i2c1 {
+-	clock-frequency = <100000>;
+-	status = "okay";
+-
+-	fru@64 {
+-		compatible = "slave-24c32";
+-		reg = <0x64>;
+-	};
+-};
+-
+-&soc {
+-	rstc: reset-controller@0 {
+-		compatible = "amd,pensando-salinasr-reset";
+-		reg = <0x0 0x0 0x0 0xff>;
+-		#reset-cells = <1>;
+-	};
+-};
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic.dtsi b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+index c9b3cbb..7514577 100644
+--- a/arch/arm64/boot/dts/pensando/salina-asic.dtsi
++++ b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+@@ -89,6 +89,42 @@
+ 			status = "disabled";
+ 		};
+ 
++		i2c2: i2c@30000 {
++			compatible = "snps,designware-i2c";
++			reg = <0x0 0x30000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			i2c-sda-hold-time-ns = <480>;
++			snps,sda-timeout-ms = <750>;
++			interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		i2c3: i2c@40000 {
++			compatible = "snps,designware-i2c";
++			reg = <0x0 0x40000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			i2c-sda-hold-time-ns = <480>;
++			snps,sda-timeout-ms = <750>;
++			interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		spi0: spi@b0000 {
++			compatible = "amd,pensando-elba-spi";
++			reg = <0x0 0xb0000 0x0 0x100>;
++			amd,pensando-elba-syscon = <&syscon>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			num-cs = <2>;
++			status = "disabled";
++		};
++
+ 		spi1: spi@c0000 {
+ 			compatible = "amd,pensando-elba-spi";
+ 			reg = <0x0 0xc0000 0x0 0x100>;
+@@ -101,6 +137,20 @@
+ 			status = "disabled";
+ 		};
+ 
++		qspi1: spi@a0000 {
++			compatible = "amd,pensando-elba-qspi", "cdns,qspi-nor";
++			reg = <0x0 0xa0000 0x0 0x400>,
++			      <0x0 0x7fff0000 0x0 0x1000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
++			clocks = <&flash_clk>;
++			cdns,fifo-depth = <1024>;
++			cdns,fifo-width = <4>;
++			cdns,trigger-address = <0x07ff0000>;
++			status = "disabled";
++		};
++
+ 		qspi0: spi@90000 {
+ 			compatible = "amd,pensando-elba-qspi";
+ 			#address-cells = <1>;
+@@ -169,11 +219,13 @@
+ 			mmc-ddr-1_8v;
+ 			mmc-hs200-1_8v;
+ 			mmc-hs400-1_8v;
++			mmc-hs400-enhanced-strobe;
+ 			cdns,phy-input-delay-sd-highspeed = <0x4>;
+ 			cdns,phy-input-delay-legacy = <0x4>;
++			cdns,phy-input-delay-mmc-ddr = <0x8>;
+ 			cdns,phy-input-delay-sd-uhs-sdr50 = <0x6>;
+ 			cdns,phy-input-delay-sd-uhs-ddr50 = <0x16>;
+-			cdns,phy-dll-delay-sdclk = <0x1f>;
++			cdns,phy-dll-delay-sdclk = <0x2f>;
+ 			status = "disabled";
+ 		};
+ 
+@@ -219,7 +271,6 @@
+ 			tx-fifo-depth = <16384>;
+ 			snps,axi-config = <&stmmac_axi_setup>;
+ 			snps,pbl = <2>;
+-			status = "disabled";
+ 			fixed-link {
+ 				speed = <1000>;
+ 				full-duplex;
+@@ -243,7 +294,6 @@
+ 			tx-fifo-depth = <16384>;
+ 			snps,axi-config = <&stmmac_axi_setup>;
+ 			snps,pbl = <2>;
+-			status = "disabled";
+ 			fixed-link {
+ 				speed = <1000>;
+ 				full-duplex;
+@@ -275,6 +325,57 @@
+ 			reg = <0x0 0x61000000 0x0 0x80000>;
+ 		};
+ 
++		wdt0: watchdog@50000 {
++			compatible = "snps,dw-wdt";
++			reg = <0x0 0x50000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		wdt1: watchdog@60000 {
++			compatible = "snps,dw-wdt";
++			reg = <0x0 0x60000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		wdt2: watchdog@70000 {
++			compatible = "snps,dw-wdt";
++			reg = <0x0 0x70000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		wdt3: watchdog@80000 {
++			compatible = "snps,dw-wdt";
++			reg = <0x0 0x80000 0x0 0x100>;
++			clocks = <&ahb_clk>;
++			interrupts = <GIC_SPI 16 IRQ_TYPE_LEVEL_HIGH>;
++			status = "disabled";
++		};
++
++		edac: edac@42c00000 {
++			compatible = "pensando,salina-edac-mc";
++			reg = <0x0 0x42c00000 0x0 0x100000>,
++			      <0x0 0x42d00000 0x0 0x100000>,
++			      <0x0 0x30000000 0x0 0x100000>,
++			      <0x0 0x30100000 0x0 0x100000>;
++			status = "disabled";
++		};
++    
++		bsm: bsm@6100020c {
++			compatible = "pensando,bsm";
++			reg = <0x0 0x6100020c 0x0 0x4>;
++		};
++
++		bsm_a35: bsm_a35@61000200 {
++			compatible = "pensando,bsm";
++			reg = <0x0 0x61000200 0x0 0x4>;
++		};
++
+ 		panic: panicdump {
+ 			compatible = "pensando,capri-crash";
+ 			status = "disabled";
+diff --git a/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi b/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
+index 4b882d7..7e8484e 100644
+--- a/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
++++ b/arch/arm64/boot/dts/pensando/salina-n1-common.dtsi
+@@ -19,8 +19,8 @@
+ 	clock-frequency = <100000000>;
+ };
+ 
+-&gmac_clk {
+-	clock-frequency = <125000000>;
++&wdt0 {
++	status = "okay";
+ };
+ 
+ &gpio0 {
+@@ -31,6 +31,55 @@
+ 	status = "ok";
+ };
+ 
++&spi0 {
++	status = "okay";
++
++	spi@0 {
++		compatible = "amd,pensando-cpld-spimux";
++		reg = <0>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++		cs0 = <&spi0 0>;
++		cs1 = <&spi0 1>;
++
++		spi@0 {
++			compatible = "amd,pensando-elbasr", "simple-mfd";
++			reg = <0>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			spi-max-frequency = <5000000>;
++
++			rstc: reset-controller@0 {
++				compatible = "amd,pensando-elbasr-reset";
++				reg = <0>;
++				spi-reset-frequency = <500000>;
++				#reset-cells = <1>;
++			};
++		};
++
++		spi@1 {
++			compatible = "amd,pensando-elbasr", "simple-mfd";
++			reg = <1>;
++			spi-max-frequency = <5000000>;
++		};
++
++		spi@2 {
++			compatible = "amd,pensando-cpld-rd1173";
++			reg = <2>;
++			spi-max-frequency = <12000000>;
++			interrupt-gpios = <&porta 0 GPIO_ACTIVE_LOW>;
++			interrupt-parent = <&porta>;
++			interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
++		};
++
++		spi@3 {
++			compatible = "amd,pensando-elbasr", "simple-mfd";
++			reg = <3>;
++			spi-max-frequency = <12000000>;
++		};
++	};
++};
++
+ &spi1 {
+ 	status = "okay";
+ 
+@@ -45,22 +94,43 @@
+ 		cdns,tsd2d-ns = <0>;
+ 		cdns,tchsh-ns = <0>;
+ 		cdns,tslch-ns = <0>;
+-		};
++	};
+ };
+ 
+ &qspi0 {
++	status = "disabled";
++
++	flash2: flash@0 {
++		compatible = "jedec,spi-nor";
++		reg = <0>;
++		spi-max-frequency = <40000000>;
++		spi-rx-bus-width = <2>;
++		m25p,fast-read;
++		cdns,read-delay = <6>;
++		cdns,tshsl-ns = <200>;
++		cdns,tsd2d-ns = <0>;
++		cdns,tchsh-ns = <0>;
++		cdns,tslch-ns = <0>;
++		write-block-size = <1024>;
++		erase-block-size = <4096>;
++	};
++};
++
++&qspi1 {
+ 	status = "okay";
+ 
+ 	flash0: flash@0 {
+ 		compatible = "jedec,spi-nor";
+ 		reg = <0>;
+-		spi-max-frequency = <24000000>;
++		spi-max-frequency = <40000000>;
+ 		spi-rx-bus-width = <2>;
+ 		m25p,fast-read;
+-		cdns,read-delay = <0>;
+-		cdns,tshsl-ns = <0>;
++		cdns,read-delay = <6>;
++		cdns,tshsl-ns = <200>;
+ 		cdns,tsd2d-ns = <0>;
+ 		cdns,tchsh-ns = <0>;
+ 		cdns,tslch-ns = <0>;
++		write-block-size = <1024>;
++		erase-block-size = <4096>;
+ 	};
+ };
+diff --git a/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi b/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
+index a1e1e8b..7982556 100644
+--- a/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
++++ b/arch/arm64/boot/dts/pensando/salina-n1-flash-parts.dtsi
+@@ -9,9 +9,190 @@
+ 		#address-cells = <1>;
+ 		#size-cells = <1>;
+ 
+-		partition@0 {
+-			label = "qspi0";
+-			reg = <0x0 0x10000000>;
++		/* DPU 256MB Layout Partitions */
++		partition@40000 {
++			label = "pentrustfw0";
++			reg = <0x00040000 0x00020000>;
++		};
++
++		partition@60000 {
++			label = "pentrustfw1";
++			reg = <0x00060000 0x00020000>;
++		};
++
++		partition@80000 {
++			label = "a35_bl1_0";
++			reg = <0x00080000 0x00020000>;
++		};
++
++		partition@a0000 {
++			label = "a35_bl1_1";
++			reg = <0x000a0000 0x00020000>;
++		};
++
++		partition@c0000 {
++			label = "n1_bl1_0";
++			reg = <0x000c0000 0x00020000>;
++		};
++
++		partition@e0000 {
++			label = "n1_bl1_1";
++			reg = <0x000e0000 0x00020000>;
++		};
++
++		partition@100000 {
++			label = "a35_boot0";
++			reg = <0x00100000 0x00020000>;
++		};
++
++		partition@120000 {
++			label = "brdcfg0";
++			reg = <0x00120000 0x00010000>;
++		};
++
++		partition@130000 {
++			label = "brdcfg1";
++			reg = <0x00130000 0x00010000>;
++		};
++
++		partition@140000 {
++			label = "a35_gold_fip";
++			reg = <0x00140000 0x01e00000>;
++		};
++
++		partition@1f40000 {
++			label = "n1_gold_ubootenv";
++			reg = <0x01f40000 0x00010000>;
++		};
++
++		partition@1f50000 {
++			label = "n1_gold_fip";
++			reg = <0x01f50000 0x00400000>;
++		};
++
++		partition@2350000 {
++			label = "n1_gold_linux";
++			reg = <0x02350000 0x04000000>;
++		};
++
++		partition@6350000 {
++			label = "n1_boot0";
++			reg = <0x06350000 0x00020000>;
++		};
++
++		partition@6400000 {
++			label = "a35_gold_ubootenv";
++			reg = <0x06400000 0x00010000>;
++		};
++
++		partition@6800000 {
++			label = "a35_uboota";
++			reg = <0x06800000 0x00800000>;
++		};
++
++		partition@7000000 {
++			label = "a35_ubootb";
++			reg = <0x07000000 0x00800000>;
++		};
++
++		partition@7800000 {
++			label = "a35_golduboot";
++			reg = <0x07800000 0x07c00000>;
++		};
++
++		partition@7c00000 {
++			label = "a35_cpld_prgm";
++			reg = <0x07c00000 0x003e0000>;
++		};
++
++		partition@7fe0000 {
++			label = "a35_ubootenv";
++			reg = <0x07fe0000 0x00010000>;
++		};
++
++		partition@8000000 {
++			label = "a35_fip_a";
++			reg = <0x08000000 0x01e00000>;
++		};
++
++		partition@9e00000 {
++			label = "a35_fip_b";
++			reg = <0x09e00000 0x01e00000>;
++		};
++
++		partition@bc00000 {
++			label = "a35_fwsel";
++			reg = <0x0bc00000 0x00010000>;
++		};
++
++		partition@bc10000 {
++			label = "a35_runcfg0";
++			reg = <0x0bc10000 0x00020000>;
++		};
++
++		partition@bc30000 {
++			label = "a35_runcfg1";
++			reg = <0x0bc30000 0x00020000>;
++		};
++
++		partition@bc50000 {
++			label = "a35_bootlog";
++			reg = <0x0bc50000 0x00020000>;
++		};
++
++		partition@bc70000 {
++			label = "a35_runtime_log";
++			reg = <0x0bc70000 0x01000000>;
++		};
++
++		partition@cc70000 {
++			label = "n1_fip_a";
++			reg = <0x0cc70000 0x00400000>;
++		};
++
++		partition@d070000 {
++			label = "n1_fip_b";
++			reg = <0x0d070000 0x00400000>;
++		};
++
++		partition@d470000 {
++			label = "n1_uefi_vars";
++			reg = <0x0d470000 0x00020000>;
++		};
++
++		partition@d490000 {
++			label = "n1_user_vars";
++			reg = <0x0d490000 0x00020000>;
++		};
++
++		partition@d4b0000 {
++			label = "n1_fwsel";
++			reg = <0x0d4b0000 0x00010000>;
++		};
++
++		partition@d4c0000 {
++			label = "oprom";
++			reg = <0x0d4c0000 0x00080000>;
++		};
++
++		partition@fec0000 {
++			label = "fwcfg0";
++			reg = <0x0fec0000 0x00010000>;
++		};
++
++		partition@fed0000 {
++			label = "fwcfg1";
++			reg = <0x0fed0000 0x00010000>;
++		};
++
++		partition@ffc0000 {
++			label = "coredump_partition";
++			reg = <0x0ffc0000 0x00020000>;
++		};
++
++		partition@ffe0000 {
++			label = "n1_ubootenv";
++			reg = <0x0ffe0000 0x00010000>;
+ 		};
+ 	};
+ };
+diff --git a/drivers/i2c/busses/i2c-designware-common.c b/drivers/i2c/busses/i2c-designware-common.c
+index e14e319..c011fed 100644
+--- a/drivers/i2c/busses/i2c-designware-common.c
++++ b/drivers/i2c/busses/i2c-designware-common.c
+@@ -467,6 +467,50 @@ void __i2c_dw_disable(struct dw_i2c_dev *dev)
+ 	dev_warn(dev->dev, "timeout in disabling adapter\n");
+ }
+ 
++static int i2c_dw_switch_irq_handler(struct dw_i2c_dev *dev,
++				     irq_handler_t handler)
++{
++	int ret;
++
++	devm_free_irq(dev->dev, dev->irq, dev);
++	ret = devm_request_irq(dev->dev, dev->irq, handler,
++			       IRQF_SHARED | IRQF_COND_SUSPEND,
++			       dev_name(dev->dev), dev);
++	if (ret)
++		dev_err(dev->dev, "failed to switch IRQ handler: %d\n", ret);
++	return ret;
++}
++
++void i2c_dw_set_mode(struct dw_i2c_dev *dev, int mode)
++{
++	irq_handler_t new_handler;
++	int ret;
++
++	if (dev->mode == mode)
++		return;
++
++	__i2c_dw_disable(dev);
++
++	if (mode == DW_IC_MASTER) {
++		i2c_dw_configure_master(dev);
++		i2c_dw_configure_fifo_master(dev);
++		new_handler = i2c_dw_isr;
++	} else {
++		i2c_dw_configure_slave(dev);
++		i2c_dw_configure_fifo_slave(dev);
++		new_handler = i2c_dw_isr_slave;
++	}
++
++	ret = i2c_dw_switch_irq_handler(dev, new_handler);
++	if (ret)
++		dev_err(dev->dev, "IRQ handler switch failed\n");
++	else
++		dev->mode = mode;
++
++	__i2c_dw_enable(dev);
++}
++EXPORT_SYMBOL_GPL(i2c_dw_set_mode);
++
+ u32 i2c_dw_clk_rate(struct dw_i2c_dev *dev)
+ {
+ 	/*
+diff --git a/drivers/i2c/busses/i2c-designware-core.h b/drivers/i2c/busses/i2c-designware-core.h
+index 54e6c44..d04dbae 100644
+--- a/drivers/i2c/busses/i2c-designware-core.h
++++ b/drivers/i2c/busses/i2c-designware-core.h
+@@ -305,6 +305,7 @@ struct dw_i2c_dev {
+ 	int			(*init)(struct dw_i2c_dev *dev);
+ 	int			(*set_sda_hold_time)(struct dw_i2c_dev *dev);
+ 	int			mode;
++	bool			mctp_controller;
+ 	struct i2c_bus_recovery_info rinfo;
+ };
+ 
+@@ -343,6 +344,19 @@ int i2c_dw_set_fifo_size(struct dw_i2c_dev *dev);
+ u32 i2c_dw_func(struct i2c_adapter *adap);
+ void i2c_dw_disable(struct dw_i2c_dev *dev);
+ void i2c_dw_disable_int(struct dw_i2c_dev *dev);
++void i2c_dw_set_mode(struct dw_i2c_dev *dev, int mode);
++void i2c_dw_configure_fifo_master(struct dw_i2c_dev *dev);
++int i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num);
++irqreturn_t i2c_dw_isr(int irq, void *dev_id);
++#if IS_ENABLED(CONFIG_I2C_DESIGNWARE_SLAVE)
++irqreturn_t i2c_dw_isr_slave(int irq, void *dev_id);
++int i2c_dw_reg_slave(struct i2c_client *slave);
++int i2c_dw_unreg_slave(struct i2c_client *slave);
++void i2c_dw_configure_fifo_slave(struct dw_i2c_dev *dev);
++#else
++static inline irqreturn_t i2c_dw_isr_slave(int irq, void *dev_id) { return IRQ_NONE; }
++static inline void i2c_dw_configure_fifo_slave(struct dw_i2c_dev *dev) { }
++#endif
+ 
+ static inline void __i2c_dw_enable(struct dw_i2c_dev *dev)
+ {
+@@ -384,7 +398,7 @@ static inline int i2c_dw_probe(struct dw_i2c_dev *dev)
+ 
+ static inline void i2c_dw_configure(struct dw_i2c_dev *dev)
+ {
+-	if (i2c_detect_slave_mode(dev->dev))
++	if (dev->mode == DW_IC_SLAVE || i2c_detect_slave_mode(dev->dev))
+ 		i2c_dw_configure_slave(dev);
+ 	else
+ 		i2c_dw_configure_master(dev);
+diff --git a/drivers/i2c/busses/i2c-designware-master.c b/drivers/i2c/busses/i2c-designware-master.c
+index bf9cf4f..efb7f8b 100644
+--- a/drivers/i2c/busses/i2c-designware-master.c
++++ b/drivers/i2c/busses/i2c-designware-master.c
+@@ -27,7 +27,7 @@
+ #define AMD_TIMEOUT_MAX_US	250
+ #define AMD_MASTERCFG_MASK	GENMASK(15, 0)
+ 
+-static void i2c_dw_configure_fifo_master(struct dw_i2c_dev *dev)
++void i2c_dw_configure_fifo_master(struct dw_i2c_dev *dev)
+ {
+ 	/* Configure Tx/Rx FIFO threshold levels */
+ 	regmap_write(dev->map, DW_IC_TX_TL, dev->tx_fifo_depth / 2);
+@@ -252,8 +252,10 @@ static void i2c_dw_xfer_init(struct dw_i2c_dev *dev)
+ 	u32 ic_con = 0, ic_tar = 0;
+ 	u32 dummy;
+ 
+-	/* Disable the adapter */
+-	__i2c_dw_disable(dev);
++	if (dev->mctp_controller)
++		i2c_dw_set_mode(dev, DW_IC_MASTER);
++	else
++		__i2c_dw_disable(dev);
+ 
+ 	/* If the slave address is ten bit address, enable 10BITADDR */
+ 	if (msgs[dev->msg_write_idx].flags & I2C_M_TEN) {
+@@ -611,7 +613,7 @@ i2c_dw_read(struct dw_i2c_dev *dev)
+ /*
+  * Prepare controller for a transaction and call i2c_dw_xfer_msg.
+  */
+-static int
++int
+ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
+ {
+ 	struct dw_i2c_dev *dev = i2c_get_adapdata(adap);
+@@ -705,6 +707,8 @@ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
+ 	ret = -EIO;
+ 
+ done:
++	if (dev->mctp_controller)
++		i2c_dw_set_mode(dev, DW_IC_SLAVE);
+ 	i2c_dw_release_lock(dev);
+ 
+ done_nolock:
+@@ -717,6 +721,10 @@ done_nolock:
+ static const struct i2c_algorithm i2c_dw_algo = {
+ 	.master_xfer = i2c_dw_xfer,
+ 	.functionality = i2c_dw_func,
++#if IS_ENABLED(CONFIG_I2C_DESIGNWARE_SLAVE)
++	.reg_slave     = i2c_dw_reg_slave,
++	.unreg_slave   = i2c_dw_unreg_slave,
++#endif
+ };
+ 
+ static const struct i2c_adapter_quirks i2c_dw_quirks = {
+@@ -840,7 +848,7 @@ tx_aborted:
+ 	return 0;
+ }
+ 
+-static irqreturn_t i2c_dw_isr(int this_irq, void *dev_id)
++irqreturn_t i2c_dw_isr(int this_irq, void *dev_id)
+ {
+ 	struct dw_i2c_dev *dev = dev_id;
+ 	u32 stat, enabled;
+diff --git a/drivers/i2c/busses/i2c-designware-platdrv.c b/drivers/i2c/busses/i2c-designware-platdrv.c
+index 7466d74..a8e7d43 100644
+--- a/drivers/i2c/busses/i2c-designware-platdrv.c
++++ b/drivers/i2c/busses/i2c-designware-platdrv.c
+@@ -139,6 +139,9 @@ static int dw_i2c_of_configure(struct platform_device *pdev)
+ 	device_property_read_u32(&pdev->dev, "snps,sda-timeout-ms",
+ 			&dev->sda_timeout_ms);
+ 
++	device_property_read_u32(&pdev->dev, "snps,sda-timeout-ms",
++				 &dev->sda_timeout_ms);
++
+ 	switch (dev->flags & MODEL_MASK) {
+ 	case MODEL_MSCC_OCELOT:
+ 		dev->ext = devm_platform_ioremap_resource(pdev, 1);
+@@ -300,6 +303,13 @@ static int dw_i2c_plat_probe(struct platform_device *pdev)
+ 
+ 	i2c_dw_adjust_bus_speed(dev);
+ 
++	/* MCTP controller support: force slave mode */
++	if (device_property_read_bool(&pdev->dev, "mctp-controller")) {
++		dev->mctp_controller = true;
++		dev_info(&pdev->dev, "MCTP controller mode enabled on this bus\n");
++		dev->mode = DW_IC_SLAVE;
++	}
++
+ 	if (pdev->dev.of_node)
+ 		dw_i2c_of_configure(pdev);
+ 
+diff --git a/drivers/i2c/busses/i2c-designware-slave.c b/drivers/i2c/busses/i2c-designware-slave.c
+index 5b54a9b..880db0a 100644
+--- a/drivers/i2c/busses/i2c-designware-slave.c
++++ b/drivers/i2c/busses/i2c-designware-slave.c
+@@ -18,7 +18,7 @@
+ 
+ #include "i2c-designware-core.h"
+ 
+-static void i2c_dw_configure_fifo_slave(struct dw_i2c_dev *dev)
++void i2c_dw_configure_fifo_slave(struct dw_i2c_dev *dev)
+ {
+ 	/* Configure Tx/Rx FIFO threshold levels. */
+ 	regmap_write(dev->map, DW_IC_TX_TL, 0);
+@@ -58,7 +58,7 @@ static int i2c_dw_init_slave(struct dw_i2c_dev *dev)
+ 	return 0;
+ }
+ 
+-static int i2c_dw_reg_slave(struct i2c_client *slave)
++int i2c_dw_reg_slave(struct i2c_client *slave)
+ {
+ 	struct dw_i2c_dev *dev = i2c_get_adapdata(slave->adapter);
+ 
+@@ -89,7 +89,7 @@ static int i2c_dw_reg_slave(struct i2c_client *slave)
+ 	return 0;
+ }
+ 
+-static int i2c_dw_unreg_slave(struct i2c_client *slave)
++int i2c_dw_unreg_slave(struct i2c_client *slave)
+ {
+ 	struct dw_i2c_dev *dev = i2c_get_adapdata(slave->adapter);
+ 
+@@ -212,7 +212,7 @@ static int i2c_dw_irq_handler_slave(struct dw_i2c_dev *dev)
+ 	return 1;
+ }
+ 
+-static irqreturn_t i2c_dw_isr_slave(int this_irq, void *dev_id)
++irqreturn_t i2c_dw_isr_slave(int this_irq, void *dev_id)
+ {
+ 	struct dw_i2c_dev *dev = dev_id;
+ 	int ret;
+@@ -228,6 +228,7 @@ static const struct i2c_algorithm i2c_dw_algo = {
+ 	.functionality = i2c_dw_func,
+ 	.reg_slave = i2c_dw_reg_slave,
+ 	.unreg_slave = i2c_dw_unreg_slave,
++	.master_xfer = i2c_dw_xfer,
+ };
+ 
+ void i2c_dw_configure_slave(struct dw_i2c_dev *dev)
+@@ -272,9 +273,13 @@ int i2c_dw_probe_slave(struct dw_i2c_dev *dev)
+ 		 "Synopsys DesignWare I2C Slave adapter");
+ 	adap->retries = 3;
+ 	adap->algo = &i2c_dw_algo;
++	dev->functionality = I2C_FUNC_SLAVE | DW_IC_DEFAULT_FUNCTIONALITY;
+ 	adap->dev.parent = dev->dev;
+ 	i2c_set_adapdata(adap, dev);
+ 
++	/* Fix null pointer in mctp response send */
++	init_completion(&dev->cmd_complete);
++
+ 	ret = devm_request_irq(dev->dev, dev->irq, i2c_dw_isr_slave,
+ 			       IRQF_SHARED, dev_name(dev->dev), dev);
+ 	if (ret) {
+diff --git a/drivers/i2c/busses/i2c-rd1173.c b/drivers/i2c/busses/i2c-rd1173.c
+index fc01c49..6eba611 100644
+--- a/drivers/i2c/busses/i2c-rd1173.c
++++ b/drivers/i2c/busses/i2c-rd1173.c
+@@ -2,7 +2,7 @@
+ /*
+  * Lattice RD1173 SPI to I2C bus interface driver
+  *
+- * Copyright (C) 2020-2022 Pensando Systems, Inc.
++ * Copyright (C) 2020-2026 Pensando Systems, Inc.
+  */
+ 
+ #include <linux/gpio/consumer.h>
+@@ -17,67 +17,68 @@
+ #include <linux/delay.h>
+ #include <linux/sysfs.h>
+ 
+-/* SoC is assigned I2C bus 0 */
+-#define PORT1_I2C_BUS_NUM    1
+-#define PORT2_I2C_BUS_NUM    2
+-
+ /* SPI command bits 7:4 */
+-#define RD1173_CMD_REG_WR         0x00    /* write internal reg */
+-#define RD1173_CMD_REG_RD         0x10    /* read internal reg */
+-#define RD1173_CMD_INT_CHECK      0x20    /* interrupt check */
+-#define RD1173_CMD_I2C_WR_N       0x30    /* write N bytes */
+-#define RD1173_CMD_I2C_RD_N       0x40    /* read N bytes */
+-#define RD1173_CMD_RD_RX_FIFO     0x50    /* read rx fifo */
++#define RD1173_CMD_REG_WR	  0x00	  /* write internal reg */
++#define RD1173_CMD_REG_RD	  0x10	  /* read internal reg */
++#define RD1173_CMD_INT_CHECK	  0x20	  /* interrupt check */
++#define RD1173_CMD_I2C_WR_N	  0x30	  /* write N bytes */
++#define RD1173_CMD_I2C_RD_N	  0x40	  /* read N bytes */
++#define RD1173_CMD_RD_RX_FIFO	  0x50	  /* read rx fifo */
+ 
+ /* Register address bits 3:0 */
+-#define RD1173_FIFO_STATUS_REG    0x01
+-#define RD1173_I2C0_CONFIG_REG    0x04
+-#define RD1173_I2C0_MODE_REG      0x05
++#define RD1173_FIFO_STATUS_REG	  0x01
++#define RD1173_I2C0_CONFIG_REG	  0x04
++#define RD1173_I2C0_MODE_REG	  0x05
+ #define RD1173_I2C0_CMD_STAT_REG  0x06
+-#define RD1173_I2C1_CONFIG_REG    0x0a
+-#define RD1173_I2C1_MODE_REG      0x0b
++#define RD1173_I2C1_CONFIG_REG	  0x0a
++#define RD1173_I2C1_MODE_REG	  0x0b
+ #define RD1173_I2C1_CMD_STAT_REG  0x0c
+ 
+ /* Register offset from master regbase */
+-#define RD1173_CONFIG_REG         0x00
+-#define RD1173_MODE_REG           0x01
+-#define RD1173_CMD_STAT_REG       0x02
++#define RD1173_CONFIG_REG	  0x00
++#define RD1173_MODE_REG		  0x01
++#define RD1173_CMD_STAT_REG	  0x02
+ 
+ /* FIFO register definitions */
+-#define RD1173_FIFO_RX0_FULL      0x80
+-#define RD1173_FIFO_RX0_EMPTY     0x40
+-#define RD1173_FIFO_TX0_FULL      0x20
+-#define RD1173_FIFO_TX0_EMPTY     0x10
+-#define RD1173_FIFO_RX1_FULL      0x08
+-#define RD1173_FIFO_RX1_EMPTY     0x04
+-#define RD1173_FIFO_TX1_FULL      0x02
+-#define RD1173_FIFO_TX1_EMPTY     0x01
++#define RD1173_FIFO_RX0_FULL	  0x80
++#define RD1173_FIFO_RX0_EMPTY	  0x40
++#define RD1173_FIFO_TX0_FULL	  0x20
++#define RD1173_FIFO_TX0_EMPTY	  0x10
++#define RD1173_FIFO_RX1_FULL	  0x08
++#define RD1173_FIFO_RX1_EMPTY	  0x04
++#define RD1173_FIFO_TX1_FULL	  0x02
++#define RD1173_FIFO_TX1_EMPTY	  0x01
+ 
+ /* Configuration register definitions */
+-#define RD1173_CONFIG_RESET       0x80
++#define RD1173_CONFIG_RESET	  0x80
+ #define RD1173_CONFIG_RXFIFO_CLR  0x40
+ #define RD1173_CONFIG_TXFIFO_CLR  0x20
+-#define RD1173_CONFIG_ABORT       0x10
++#define RD1173_CONFIG_ABORT	  0x10
+ #define RD1173_CONFIG_RXREAD_CLR  0x08
+ #define RD1173_CONFIG_TXREAD_CLR  0x04
+-#define RD1173_CONFIG_INT_CLR     0x02
+-#define RD1173_CONFIG_START       0x01
++#define RD1173_CONFIG_INT_CLR	  0x02
++#define RD1173_CONFIG_START	  0x01
+ 
+ /* Mode register definitions */
+-#define RD1173_MODE_BPS1          0x80
+-#define RD1173_MODE_BPS0          0x40
+-#define RD1173_MODE_TX_IE         0x20
+-#define RD1173_MODE_ACK_POL       0x10
+-#define RD1173_MODE_RX_IE         0x08
++#define RD1173_MODE_BPS1	  0x80
++#define RD1173_MODE_BPS0	  0x40
++#define RD1173_MODE_TX_IE	  0x20
++#define RD1173_MODE_ACK_POL	  0x10
++#define RD1173_MODE_RX_IE	  0x08
+ 
+ /* Command status register definitions */
+-#define RD1173_STAT_I2C_BUSY      0x80
+-#define RD1173_STAT_NO_ANS        0x40
+-#define RD1173_STAT_NO_ACK        0x20
+-#define RD1173_STAT_TX_ERR        0x10
+-#define RD1173_STAT_RX_ERR        0x08
+-#define RD1173_STAT_ABORT_ACK     0x04
+-#define RD1173_STAT_TS            0x02
++#define RD1173_STAT_I2C_BUSY	  0x80
++#define RD1173_STAT_NO_ANS	  0x40
++#define RD1173_STAT_NO_ACK	  0x20
++#define RD1173_STAT_TX_ERR	  0x10
++#define RD1173_STAT_RX_ERR	  0x08
++#define RD1173_STAT_ABORT_ACK	  0x04
++#define RD1173_STAT_TS		  0x02
++
++#define RD1173_RESET_ERRORS	(RD1173_STAT_I2C_BUSY | \
++				 RD1173_STAT_TX_ERR | \
++				 RD1173_STAT_RX_ERR | \
++				 RD1173_STAT_ABORT_ACK)
+ 
+ struct i2c_stats {
+ 	u32 i2c0_tx_complete;
+@@ -128,19 +129,19 @@ struct chipdesc {
+ 	const struct regmap_config *regmap_cfg;
+ };
+ 
+-#define i2c_show_simple(field, name, format_string, cast)                  \
+-static ssize_t                                                             \
++#define i2c_show_simple(field, name, format_string, cast)		   \
++static ssize_t								   \
+ show_##name(struct device *dev, struct device_attribute *attr, char *buf)  \
+-{                                                                          \
+-	struct spi_device *spi = to_spi_device(dev);                       \
+-	struct rd1173dev *rd1173dev = spi_get_drvdata(spi);                \
+-	struct i2c_stats *i2c_stats = &rd1173dev->stats;                   \
++{									   \
++	struct spi_device *spi = to_spi_device(dev);			   \
++	struct rd1173dev *rd1173dev = spi_get_drvdata(spi);		   \
++	struct i2c_stats *i2c_stats = &rd1173dev->stats;		   \
+ 									   \
+-	return snprintf(buf, 20, format_string, cast i2c_stats->field);    \
++	return snprintf(buf, 20, format_string, cast i2c_stats->field);	   \
+ }
+ 
+-#define i2c_attr_show(field, name, format_string, type)         \
+-	i2c_show_simple(field, name, format_string, (type))     \
++#define i2c_attr_show(field, name, format_string, type) \
++	i2c_show_simple(field, name, format_string, (type)); \
+ static DEVICE_ATTR(name, 0444, show_##name, NULL)
+ 
+ i2c_attr_show(i2c0_tx_complete, i2c0_tx_complete, "%d\n", u32);
+@@ -210,7 +211,8 @@ store_##name(struct device *dev, struct device_attribute *attr,		\
+ 	int ret;							\
+ 									\
+ 	ret = kstrtoul(buf, base, &val);				\
+-	if (ret) return ret;						\
++	if (ret)							\
++		return ret;						\
+ 	regmap_write(rd1173dev->regmap, field, (unsigned int)val);	\
+ 	return count;							\
+ }
+@@ -275,33 +277,26 @@ static const struct chipdesc chip_rd1173 = {
+ static irqreturn_t rd1173_irq_handler(int this_irq, void *data)
+ {
+ 	struct rd1173dev *rd1173dev = data;
+-	struct rd1173_i2c_adapter *i2c0 = &rd1173dev->i2c_adap[0];
+-	struct rd1173_i2c_adapter *i2c1 = &rd1173dev->i2c_adap[1];
++	struct rd1173_i2c_adapter *i2c;
+ 	int rc;
+ 
+-	if (rd1173dev->active_port == 1) {
+-		rc = regmap_read(rd1173dev->regmap,
+-				 i2c0->offset + RD1173_CMD_STAT_REG,
+-				 &i2c0->state);
+-		if (rc)
+-			return IRQ_NONE;
++	if (rd1173dev->active_port >= 2)
++		return IRQ_NONE;
+ 
+-		if (i2c0->state & RD1173_STAT_TS) {
+-			complete(&i2c0->rd1173dev->completion);
+-			return IRQ_HANDLED;
+-		}
+-	} else if (rd1173dev->active_port == 2) {
+-		rc = regmap_read(rd1173dev->regmap,
+-				 i2c1->offset + RD1173_CMD_STAT_REG,
+-				 &i2c1->state);
+-		if (rc)
+-			return IRQ_NONE;
+-
+-		if (i2c1->state & RD1173_STAT_TS) {
+-			complete(&i2c1->rd1173dev->completion);
+-			return IRQ_HANDLED;
+-		}
++	i2c = &rd1173dev->i2c_adap[rd1173dev->active_port];
++
++	rc = regmap_read(rd1173dev->regmap,
++			 i2c->offset + RD1173_CMD_STAT_REG,
++			 &i2c->state);
++
++	if (rc)
++		return IRQ_NONE;
++
++	if (i2c->state & RD1173_STAT_TS) {
++		complete(&rd1173dev->completion);
++		return IRQ_HANDLED;
+ 	}
++
+ 	return IRQ_NONE;
+ }
+ 
+@@ -573,127 +568,126 @@ static void update_i2c_stats(struct rd1173_i2c_adapter *i2c, int readop)
+  *
+  * Returns the number of messages processed, or a negative errno on failure.
+  */
+-static int rd1173_xfer(struct i2c_adapter *i2c_adap, struct i2c_msg *msgs, int num)
++static int rd1173_xfer(struct i2c_adapter *adap,
++		       struct i2c_msg *msgs, int num)
+ {
+-	struct rd1173_i2c_adapter *i2c = i2c_get_adapdata(i2c_adap);
++	struct rd1173_i2c_adapter *i2c = i2c_get_adapdata(adap);
+ 	struct device *dev = &i2c->rd1173dev->spi->dev;
+-	u8 max_len = i2c->rd1173dev->chip->buffer_size;
+-	int read_operation = 0;
+-	u16 bytes_remaining;
+-	u16 bytes_transferred;
+-	u8 num_transfers;
+-	u8 rx_fifo[9];
+-	u8 cnt;
+-	int rc = 0;
+-	int i, j;
+-
+-	if (num > 2)
+-		return -EOPNOTSUPP;
+-
+-	for (i = 0; i < num; i++) {
+-		if (msgs[i].flags & I2C_M_RD) {
+-			if (msgs[i].len > 256)
+-				return -EOPNOTSUPP;
+-			read_operation++;
+-		} else {
+-			/* Writes limited buffer size */
+-			if (msgs[i].len > max_len)
+-				return -EOPNOTSUPP;
+-		}
+-		dev_dbg(dev, "i2c%d msgs[%d]: addr 0x%x flags 0x%x len %d\n",
+-			i2c->i2c_adap.nr - 1, i, msgs[i].addr, msgs[i].flags,
+-			msgs[i].len);
+-	}
++	int i, ret = 0;
++	u32 state;
+ 
+ 	if (mutex_lock_interruptible(&i2c->rd1173dev->xfer_active))
+ 		return -ERESTARTSYS;
+ 
+-	reinit_completion(&i2c->rd1173dev->completion);
+-	i2c->rd1173dev->active_port = i2c->i2c_adap.nr;
++	i2c->rd1173dev->active_port = i2c->i2c_master;
+ 
+ 	for (i = 0; i < num; i++) {
+-		rd1173_fifo_clear(i2c);
+-		rd1173_clear_cmdstat(i2c);
+-
+-		bytes_transferred = 0;
+-		bytes_remaining = msgs[i].len;
+-		num_transfers = (bytes_remaining + max_len - 1) / max_len;
+-
+-		for (j = 0; j < num_transfers; j++) {
++		struct i2c_msg *msg = &msgs[i];
++		bool readop = !!(msg->flags & I2C_M_RD);
++		struct i2c_msg sub = *msg;
++		int remaining = msg->len;
++		int offset = 0;
++
++		dev_dbg(dev, "i2c%d xfer: %s addr=0x%02x len=%d\n",
++			i2c->rd1173dev->active_port,
++			readop ? "RD" : "WR",
++			msg->addr, msg->len);
++
++		while (remaining > 0) {
++			int chunk = min(remaining, 8);
++			u8 tmp[9]; /* status + data */
++
++			/* Prepare hardware for THIS chunk */
+ 			rd1173_fifo_clear(i2c);
+ 			rd1173_clear_cmdstat(i2c);
+ 
+-			if (bytes_remaining > max_len)
+-				cnt = max_len;
+-			else
+-				cnt = bytes_remaining;
++			reinit_completion(&i2c->rd1173dev->completion);
+ 
+-			if (msgs[i].flags & I2C_M_RD) {
+-				dev_dbg(dev, "i2c%d read addr 0x%x len %d\n",
+-					i2c->i2c_adap.nr - 1, msgs[i].addr,
+-					msgs[i].len);
+-				rc = rd1173_read(i2c, &msgs[i], cnt);
++			if (readop) {
++				sub.len = chunk;
++				ret = rd1173_read(i2c, &sub, chunk);
+ 			} else {
+-				dev_dbg(dev, "i2c%d write addr 0x%x len %d\n",
+-					i2c->i2c_adap.nr - 1, msgs[i].addr,
+-					msgs[i].len);
+-				rc = rd1173_write(i2c, &msgs[i], cnt);
++				sub.len = chunk;
++				sub.buf = msg->buf + offset;
++				ret = rd1173_write(i2c, &sub, chunk);
++			}
++
++			if (ret) {
++				dev_err(dev, "RD1173: failed to issue %s\n",
++					readop ? "read" : "write");
++				goto out_unlock;
++			}
++
++			/* Wait for TS interrupt */
++			ret = wait_for_completion_timeout(
++					&i2c->rd1173dev->completion,
++					i2c->i2c_adap.timeout);
++
++			if (ret == 0) {
++				dev_err(dev, "RD1173: timeout waiting for completion\n");
++				ret = -ETIMEDOUT;
++				goto out_unlock;
++			}
++
++			/* Read final status */
++			ret = regmap_read(i2c->rd1173dev->regmap,
++					  i2c->offset + RD1173_CMD_STAT_REG,
++					  &state);
++			if (ret) {
++				dev_err(dev, "RD1173: failed to read CMD_STAT\n");
++				goto out_unlock;
+ 			}
+ 
+-			rc = wait_for_completion_timeout(&i2c->rd1173dev->completion,
+-							 i2c->i2c_adap.timeout);
++			i2c->state = state;
++			update_i2c_stats(i2c, readop);
+ 
+-			update_i2c_stats(i2c, msgs[i].flags & I2C_M_RD);
++			/* Check for errors */
++			if (state & RD1173_STAT_NO_ANS) {
++				dev_info(dev, "RD1173: NO_ANS state=0x%02x\n", state);
++				ret = -ENXIO;
++				goto out_unlock;
++			}
+ 
+-			if (!rc && i2c->state != RD1173_STAT_TS)
+-				dev_dbg(dev, "i2c%d cmdstat 0x%02x\n",
+-					i2c->i2c_adap.nr - 1, i2c->state);
++			if (state & RD1173_STAT_NO_ACK) {
++				dev_dbg(dev, "RD1173: NO_ACK state=0x%02x\n", state);
++			}
+ 
+-			if (!rc || i2c->state != RD1173_STAT_TS)
+-				goto done;
++			if (state & RD1173_STAT_TX_ERR) {
++				dev_dbg(dev, "RD1173: TX_ERR state=0x%02x\n", state);
++			}
+ 
+-			if (msgs[i].flags & I2C_M_RD) {
+-				rc = rd1173_read_buffer(i2c, rx_fifo, cnt);
+-				if (rc)
+-					goto done;
++			if (state & RD1173_STAT_RX_ERR) {
++				dev_err(dev, "RD1173: RX_ERR state=0x%02x\n", state);
++				ret = -EIO;
++				goto out_unlock;
++			}
+ 
+-				memcpy((u8 *)(msgs[i].buf + bytes_transferred),
+-				       &rx_fifo[1], cnt);
++			/* Read FIFO */
++			if (readop) {
++				ret = rd1173_read_buffer(i2c, tmp, chunk);
++				if (ret) {
++					dev_err(dev, "RD1173: read_buffer failed\n");
++					goto out_unlock;
++				}
+ 
+-				bytes_remaining -= cnt;
+-				bytes_transferred += cnt;
++				memcpy(msg->buf + offset, tmp + 1, chunk);
+ 			}
++
++			remaining -= chunk;
++			offset += chunk;
+ 		}
+ 	}
+ 
+-done:
++	ret = num;
++
++out_unlock:
+ 	rd1173_clear_cmdstat(i2c);
+-	switch (i2c->state) {
+-	case RD1173_STAT_TS:
+-		rc = num;        /* transfer complete */
+-		break;
+-	case RD1173_STAT_I2C_BUSY:
+-		rd1173_reset(i2c);
+-		rc = -EAGAIN;
+-		break;
+-	case RD1173_STAT_NO_ANS:
+-		rc = -ENXIO;
+-		break;
+-	case RD1173_STAT_NO_ACK:
+-		rc = -EREMOTEIO;
+-		break;
+-	case RD1173_STAT_TX_ERR:
+-	case RD1173_STAT_RX_ERR:
+-	case RD1173_STAT_ABORT_ACK:
++
++	if (ret < 0 && (i2c->state & RD1173_RESET_ERRORS))
+ 		rd1173_reset(i2c);
+-		rc = -EAGAIN;
+-	default:
+-		rc = -EAGAIN;
+-	}
+ 
+-	i2c->rd1173dev->active_port = 0;
+ 	mutex_unlock(&i2c->rd1173dev->xfer_active);
+-	return rc;
++	return ret;
+ }
+ 
+ static u32 rd1173_func(struct i2c_adapter *adap)
+@@ -710,7 +704,8 @@ static int rd1173_probe(struct spi_device *spi)
+ {
+ 	struct rd1173dev *rd1173dev;
+ 	struct rd1173_i2c_adapter *i2c;
+-	int i, rc;
++	struct gpio_desc *irq_gpiod;
++	int i, rc, irq;
+ 
+ 	rd1173dev = devm_kzalloc(&spi->dev, sizeof(*rd1173dev), GFP_KERNEL);
+ 	if (!rd1173dev)
+@@ -733,7 +728,6 @@ static int rd1173_probe(struct spi_device *spi)
+ 		i2c->i2c_adap.owner = THIS_MODULE;
+ 		i2c->i2c_adap.class = I2C_CLASS_DEPRECATED;
+ 		i2c->i2c_adap.timeout = msecs_to_jiffies(100);
+-		i2c->i2c_adap.nr = PORT1_I2C_BUS_NUM + i;
+ 
+ 		if (i == 0)
+ 			i2c->offset = RD1173_I2C0_CONFIG_REG;
+@@ -762,13 +756,35 @@ static int rd1173_probe(struct spi_device *spi)
+ 		return rc;
+ 	}
+ 
+-
+ 	mutex_init(&rd1173dev->xfer_active);
+ 
+-	rc = devm_request_threaded_irq(&spi->dev, spi->irq, NULL,
+-				       rd1173_irq_handler,
+-				       IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+-				       "cpld-rd1173", rd1173dev);
++	/* Check for Salina GPIO-based interrupt */
++	irq_gpiod = devm_gpiod_get_optional(&spi->dev, "interrupt", GPIOD_IN);
++
++	if (!IS_ERR(irq_gpiod) && irq_gpiod) {
++		irq = gpiod_to_irq(irq_gpiod);
++		if (irq < 0)
++			return irq;
++
++		dev_info(&spi->dev, "Using GPIO IRQ %d\n", irq);
++
++	} else {
++		/* Fallback to legacy SPI IRQ (Elba) */
++		irq = spi->irq;
++
++		if (irq <= 0) {
++			dev_err(&spi->dev, "No valid IRQ found\n");
++			return -EINVAL;
++		}
++
++		dev_info(&spi->dev, "Using SPI IRQ %d\n", irq);
++	}
++
++	/* Now request it */
++	rc = devm_request_threaded_irq(&spi->dev, irq, NULL,
++					rd1173_irq_handler,
++					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
++					"cpld-rd1173", rd1173dev);
+ 	if (rc) {
+ 		dev_err(&spi->dev, "Failed to request irq, err %d\n", rc);
+ 		return rc;
+@@ -785,7 +801,8 @@ static int rd1173_probe(struct spi_device *spi)
+ 		rd1173_reset(i2c);
+ 		rd1173_fifo_clear(i2c);
+ 
+-		rc = i2c_add_numbered_adapter(&i2c->i2c_adap);
++		i2c->i2c_adap.nr = -1;
++		rc = i2c_add_adapter(&i2c->i2c_adap);
+ 		if (rc) {
+ 			dev_err(&spi->dev, "error adding i2c adapter: %d\n", rc);
+ 			return rc;
+@@ -811,28 +828,19 @@ static void rd1173_remove(struct spi_device *spi)
+ 
+ 	i2c_del_adapter(&rd1173dev->i2c_adap[0].i2c_adap);
+ 	i2c_del_adapter(&rd1173dev->i2c_adap[1].i2c_adap);
+-
+-	return;
+ }
+ 
+-static const struct spi_device_id rd1173_spi_ids[] = {
+-	{ .name = "cpld-rd1173" },
+-	{},
+-};
+-MODULE_DEVICE_TABLE(spi, rd1173_spi_ids);
+-
+ #ifdef CONFIG_OF
+ static const struct of_device_id rd1173_of_match[] = {
+-	{ .compatible = "pensando,cpld-rd1173", .data = &chip_rd1173 },
++	{ .compatible = "amd,pensando-cpld-rd1173", .data = &chip_rd1173 },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, rd1173_of_match);
+ #endif
+ 
+ static struct spi_driver rd1173_driver = {
+-	.probe  = rd1173_probe,
++	.probe	= rd1173_probe,
+ 	.remove = rd1173_remove,
+-	.id_table = rd1173_spi_ids,
+ 	.driver = {
+ 		.name  = "i2c-rd1173",
+ 		.of_match_table = of_match_ptr(rd1173_of_match),
+diff --git a/drivers/net/mctp/mctp-i2c.c b/drivers/net/mctp/mctp-i2c.c
+index 7635a8b..d795634 100644
+--- a/drivers/net/mctp/mctp-i2c.c
++++ b/drivers/net/mctp/mctp-i2c.c
+@@ -306,6 +306,13 @@ static int mctp_i2c_recv(struct mctp_i2c_dev *midev)
+ 		return -EINVAL;
+ 	}
+ 
++	pr_debug("mctp-i2c rx: dst=0x%02x src=0x%02x cmd=0x%02x bytes=%u len=%zu\n",
++		 hdr->dest_slave >> 1, hdr->source_slave >> 1,
++		 hdr->command, hdr->byte_count, recvlen);
++
++	print_hex_dump_debug("mctp-i2c rx: ", DUMP_PREFIX_NONE, 16, 1,
++			     midev->rx_buffer, recvlen, false);
++
+ 	skb = netdev_alloc_skb(ndev, recvlen);
+ 	if (!skb) {
+ 		ndev->stats.rx_dropped++;
+@@ -480,6 +487,13 @@ static void mctp_i2c_xmit(struct mctp_i2c_dev *midev, struct sk_buff *skb)
+ 	msg.len = 2 + hdr->byte_count + 1;
+ 	msg.addr = hdr->dest_slave >> 1;
+ 
++	pr_debug("mctp-i2c tx: dst=0x%02x src=0x%02x cmd=0x%02x bytes=%u len=%d\n",
++		 hdr->dest_slave >> 1, hdr->source_slave >> 1,
++		 hdr->command, hdr->byte_count, msg.len);
++
++	print_hex_dump_debug("mctp-i2c tx: ", DUMP_PREFIX_NONE, 16, 1,
++			     msg.buf, msg.len, false);
++
+ 	switch (fs) {
+ 	case MCTP_I2C_TX_FLOW_NONE:
+ 		/* no flow: full lock & unlock */
+diff --git a/drivers/spi/spi-cadence-quadspi.c b/drivers/spi/spi-cadence-quadspi.c
+index 9a362a9..42d018a 100644
+--- a/drivers/spi/spi-cadence-quadspi.c
++++ b/drivers/spi/spi-cadence-quadspi.c
+@@ -303,6 +303,14 @@ static u32 cqspi_get_rd_sram_level(struct cqspi_st *cqspi)
+ 	return reg & CQSPI_REG_SDRAMLEVEL_RD_MASK;
+ }
+ 
++static u32 cqspi_get_wr_sram_level(struct cqspi_st *cqspi)
++{
++	u32 reg = readl(cqspi->iobase + CQSPI_REG_SDRAMLEVEL);
++
++	reg >>= CQSPI_REG_SDRAMLEVEL_WR_LSB;
++	return reg & CQSPI_REG_SDRAMLEVEL_WR_MASK;
++}
++
+ static u32 cqspi_get_versal_dma_status(struct cqspi_st *cqspi)
+ {
+ 	u32 dma_status;
+@@ -315,6 +323,54 @@ static u32 cqspi_get_versal_dma_status(struct cqspi_st *cqspi)
+ 	return dma_status & CQSPI_REG_VERSAL_DMA_DST_DONE_MASK;
+ }
+ 
++/*
++ * Threaded IRQ handler for Pensando/Salina APB-AHB hazard workaround.
++ *
++ * The bridge latency between the AHB-side transfer-complete event and its
++ * visibility via the APB IRQSTATUS register can exceed the time between the
++ * GIC delivering the interrupt and the hard-IRQ handler running.  Reading
++ * IRQSTATUS in the hard-IRQ context therefore returns 0 and complete() is
++ * never called.
++ *
++ * Running in a kernel thread allows udelay() so the bridge has time to
++ * propagate before IRQSTATUS is sampled.
++ */
++static irqreturn_t cqspi_irq_thread(int this_irq, void *dev)
++{
++	struct cqspi_st *cqspi = dev;
++
++	/*
++	 * Clear all interrupt status bits unconditionally (write-1-to-clear).
++	 *
++	 * On Pensando/Salina the APB-AHB bridge means IRQSTATUS may read as 0
++	 * even though the AHB-side IND_COMP bit is set.  If we only wrote back
++	 * what we read, a stuck AHB-side IND_COMP would immediately re-fire
++	 * the interrupt when IRQMASK is re-enabled for the next page, causing
++	 * that page's real IND_COMP to be missed and a timeout.  Writing
++	 * all-ones guarantees the AHB-side status is cleared regardless.
++	 *
++	 * This handler is only woken (apb_ahb_hazard path) when the GIC has
++	 * delivered a real interrupt — the only enabled sources are IND_COMP
++	 * and UNDERFLOW — so calling complete() unconditionally is safe.
++	 */
++	writel(CQSPI_IRQ_STATUS_MASK, cqspi->iobase + CQSPI_REG_IRQSTATUS);
++	/*
++	 * CONFIG read-modify-write flushes the IRQSTATUS clear all the way
++	 * through the APB-AHB bridge to the AHB-side register file.  Without
++	 * this, a simple readl() only commits the write to the APB side of the
++	 * bridge; the AHB side may still show IND_COMP set when the GIC
++	 * unmasks the interrupt line on thread exit, causing an immediate
++	 * spurious re-delivery.  The r-m-w stalls the APB bus until the prior
++	 * write is visible from both sides.
++	 */
++	writel(readl(cqspi->iobase + CQSPI_REG_CONFIG),
++	       cqspi->iobase + CQSPI_REG_CONFIG);
++
++	complete(&cqspi->transfer_complete);
++
++	return IRQ_HANDLED;
++}
++
+ static irqreturn_t cqspi_irq_handler(int this_irq, void *dev)
+ {
+ 	struct cqspi_st *cqspi = dev;
+@@ -324,7 +380,14 @@ static irqreturn_t cqspi_irq_handler(int this_irq, void *dev)
+ 
+ 	ddata = of_device_get_match_data(device);
+ 
+-	/* Read interrupt status */
++	/*
++	 * On Pensando/Salina defer to the threaded handler so that udelay()
++	 * can be used to wait for the APB-AHB bridge to propagate the
++	 * AHB-side completion event into IRQSTATUS.
++	 */
++	if (cqspi->apb_ahb_hazard)
++		return IRQ_WAKE_THREAD;
++
+ 	irq_status = readl(cqspi->iobase + CQSPI_REG_IRQSTATUS);
+ 
+ 	/* Clear interrupt */
+@@ -679,6 +742,10 @@ static int cqspi_indirect_read_execute(struct cqspi_flash_pdata *f_pdata,
+ 
+ 	/* Clear all interrupts. */
+ 	writel(CQSPI_IRQ_STATUS_MASK, reg_base + CQSPI_REG_IRQSTATUS);
++	/* Flush IRQSTATUS clear to AHB before enabling IRQMASK. */
++	if (cqspi->apb_ahb_hazard)
++		writel(readl(reg_base + CQSPI_REG_CONFIG),
++		       reg_base + CQSPI_REG_CONFIG);
+ 
+ 	/*
+ 	 * On SoCFPGA platform reading the SRAM is slow due to
+@@ -694,8 +761,17 @@ static int cqspi_indirect_read_execute(struct cqspi_flash_pdata *f_pdata,
+ 		writel(CQSPI_REG_IRQ_WATERMARK, reg_base + CQSPI_REG_IRQMASK);
+ 
+ 	reinit_completion(&cqspi->transfer_complete);
++
++	/* Flush APB-AHB bridge before START to ensure IRQMASK is visible on AHB side. */
++	if (cqspi->apb_ahb_hazard)
++		writel(readl(reg_base + CQSPI_REG_CONFIG),
++		       reg_base + CQSPI_REG_CONFIG);
++
+ 	writel(CQSPI_REG_INDIRECTRD_START_MASK,
+ 	       reg_base + CQSPI_REG_INDIRECTRD);
++	/* Dummy readback after START to drain the APB write pipeline. */
++	if (cqspi->apb_ahb_hazard)
++		readl(reg_base + CQSPI_REG_INDIRECTRD);
+ 
+ 	while (remaining > 0) {
+ 		if (!wait_for_completion_timeout(&cqspi->transfer_complete,
+@@ -956,18 +1032,68 @@ static int cqspi_indirect_write_execute(struct cqspi_flash_pdata *f_pdata,
+ 	struct device *dev = &cqspi->pdev->dev;
+ 	void __iomem *reg_base = cqspi->iobase;
+ 	unsigned int remaining = n_tx;
+-	unsigned int write_bytes;
++	size_t write_words, mod_bytes;
+ 	int ret;
+ 
+ 	writel(to_addr, reg_base + CQSPI_REG_INDIRECTWRSTARTADDR);
+ 	writel(remaining, reg_base + CQSPI_REG_INDIRECTWRBYTES);
+ 
++	/*
++	 * reinit_completion() must come before clearing IRQSTATUS and
++	 * re-enabling IRQMASK.  If the previous page's threaded handler is
++	 * delayed by the scheduler and calls complete() after we clear
++	 * IRQSTATUS but before reinit_completion(), that spurious complete()
++	 * is lost and this page's wait_for_completion_timeout() will block
++	 * until the real IND_COMP fires — which is correct.  If instead
++	 * reinit_completion() ran after the spurious complete(), it would wipe
++	 * the counter and the real IND_COMP might still arrive, so no harm
++	 * either way.  The dangerous race is reinit_completion() running AFTER
++	 * this page's real IND_COMP has been delivered, which cannot happen
++	 * because IRQMASK is still 0 at this point.
++	 */
++	reinit_completion(&cqspi->transfer_complete);
++
+ 	/* Clear all interrupts. */
+ 	writel(CQSPI_IRQ_STATUS_MASK, reg_base + CQSPI_REG_IRQSTATUS);
++	/*
++	 * On Pensando/Salina, APB writes may not propagate to the AHB side
++	 * immediately.  If IND_COMP from the previous page (or a preceding
++	 * read operation) remains set in the AHB-side IRQSTATUS when IRQMASK
++	 * is re-enabled below, the controller immediately asserts the interrupt
++	 * line causing a spurious interrupt.  A CONFIG read-modify-write stalls
++	 * the APB bus until all pending writes — including the IRQSTATUS clear
++	 * — have been committed to the AHB side, ensuring the interrupt line is
++	 * deasserted before IRQMASK is written.  A simple readl() is
++	 * insufficient as it only flushes to the APB side of the bridge, not
++	 * necessarily through to AHB.
++	 */
++	if (cqspi->apb_ahb_hazard)
++		writel(readl(reg_base + CQSPI_REG_CONFIG),
++		       reg_base + CQSPI_REG_CONFIG);
+ 
+-	writel(CQSPI_IRQ_MASK_WR, reg_base + CQSPI_REG_IRQMASK);
++	/*
++	 * Enable only IND_COMP (and UNDERFLOW for error detection).
++	 * Do not enable WATERMARK — the write WATERMARK threshold defaults
++	 * to 0 so WATERMARK never fires for writes.  Instead we push all
++	 * data into the SRAM immediately after START (spi-nor limits each
++	 * call to one page ≤ 256 bytes, well within the SRAM write partition
++	 * of fifo_depth/2 words), then wait for the single IND_COMP interrupt.
++	 */
++	writel(CQSPI_REG_IRQ_IND_COMP | CQSPI_REG_IRQ_UNDERFLOW,
++	       reg_base + CQSPI_REG_IRQMASK);
++
++	/*
++	 * On Pensando/Salina the APB and AHB sides of the controller have a
++	 * bridge hazard: APB writes (STARTADDR, NBYTES, IRQMASK) may not have
++	 * propagated to the AHB-side controller logic before the START bit is
++	 * seen.  A CONFIG read-modify-write (a functional NOP) immediately
++	 * before asserting START stalls the APB bus long enough to drain the
++	 * bridge pipeline.
++	 */
++	if (cqspi->apb_ahb_hazard)
++		writel(readl(reg_base + CQSPI_REG_CONFIG),
++		       reg_base + CQSPI_REG_CONFIG);
+ 
+-	reinit_completion(&cqspi->transfer_complete);
+ 	writel(CQSPI_REG_INDIRECTWR_START_MASK,
+ 	       reg_base + CQSPI_REG_INDIRECTWR);
+ 	/*
+@@ -981,58 +1107,62 @@ static int cqspi_indirect_write_execute(struct cqspi_flash_pdata *f_pdata,
+ 		ndelay(cqspi->wr_delay);
+ 
+ 	/*
+-	 * If a hazard exists between the APB and AHB interfaces, perform a
+-	 * dummy readback from the controller to ensure synchronization.
++	 * Dummy readback of INDIRECTWR after START to stall the APB bus
++	 * until the AHB-side controller has registered the start condition.
+ 	 */
+ 	if (cqspi->apb_ahb_hazard)
+-		(void)readl(reg_base + CQSPI_REG_INDIRECTWR);
+-
+-	while (remaining > 0) {
+-		size_t write_words, mod_bytes;
+-
+-		write_bytes = remaining;
+-		write_words = write_bytes / 4;
+-		mod_bytes = write_bytes % 4;
+-		/* Write 4 bytes at a time then single bytes. */
+-		if (write_words) {
+-			iowrite32_rep(cqspi->ahb_base, txbuf, write_words);
+-			txbuf += (write_words * 4);
+-		}
+-		if (mod_bytes) {
+-			unsigned int temp = 0xFFFFFFFF;
+-
+-			memcpy(&temp, txbuf, mod_bytes);
+-			iowrite32(temp, cqspi->ahb_base);
+-			txbuf += mod_bytes;
+-		}
+-
+-		if (!wait_for_completion_timeout(&cqspi->transfer_complete,
+-						 msecs_to_jiffies(CQSPI_TIMEOUT_MS))) {
+-			dev_err(dev, "Indirect write timeout\n");
+-			ret = -ETIMEDOUT;
+-			goto failwr;
+-		}
+-
+-		remaining -= write_bytes;
++		readl(reg_base + CQSPI_REG_INDIRECTWR);
++
++	/* Push all data into the write SRAM now — do not wait for WATERMARK. */
++	write_words = remaining / 4;
++	mod_bytes = remaining % 4;
++	if (write_words) {
++		iowrite32_rep(cqspi->ahb_base, txbuf, write_words);
++		txbuf += write_words * 4;
++	}
++	if (mod_bytes) {
++		unsigned int temp = 0xFFFFFFFF;
+ 
+-		if (remaining > 0)
+-			reinit_completion(&cqspi->transfer_complete);
++		memcpy(&temp, txbuf, mod_bytes);
++		iowrite32(temp, cqspi->ahb_base);
+ 	}
+ 
+-	/* Check indirect done status */
+-	ret = cqspi_wait_for_bit(reg_base + CQSPI_REG_INDIRECTWR,
+-				 CQSPI_REG_INDIRECTWR_DONE_MASK, 0);
+-	if (ret) {
+-		dev_err(dev, "Indirect write completion error (%i)\n", ret);
++	/*
++	 * Wait for IND_COMP interrupt.  On Pensando/Salina the APB-AHB bridge
++	 * can intermittently lose the interrupt even though the flash write
++	 * completes successfully.  Use a short timeout and fall back to polling
++	 * INDIRECTWR_DONE directly.
++	 */
++	if (!wait_for_completion_timeout(&cqspi->transfer_complete,
++					 msecs_to_jiffies(cqspi->apb_ahb_hazard ?
++							  5 : CQSPI_TIMEOUT_MS))) {
++		if (cqspi->apb_ahb_hazard) {
++			u32 wr_reg;
++
++			/* Disable interrupt before polling to prevent races. */
++			writel(0, reg_base + CQSPI_REG_IRQMASK);
++
++			ret = readl_poll_timeout(reg_base + CQSPI_REG_INDIRECTWR,
++						 wr_reg,
++						 wr_reg & CQSPI_REG_INDIRECTWR_DONE_MASK,
++						 10, CQSPI_TIMEOUT_MS * 1000);
++			if (ret) {
++				dev_err(dev, "Indirect write timeout\n");
++				goto failwr;
++			}
++			goto clearwr;
++		}
++		dev_err(dev, "Indirect write timeout\n");
++		ret = -ETIMEDOUT;
+ 		goto failwr;
+ 	}
+ 
+ 	/* Disable interrupt. */
+ 	writel(0, reg_base + CQSPI_REG_IRQMASK);
+ 
++clearwr:
+ 	/* Clear indirect completion status */
+ 	writel(CQSPI_REG_INDIRECTWR_DONE_MASK, reg_base + CQSPI_REG_INDIRECTWR);
+-
+ 	cqspi_wait_idle(cqspi);
+ 
+ 	return 0;
+@@ -1715,8 +1845,19 @@ static int cqspi_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ 
+-	ret = devm_request_irq(dev, irq, cqspi_irq_handler, 0,
+-			       pdev->name, cqspi);
++	/*
++	 * On Pensando/Salina register a threaded IRQ so the handler can
++	 * udelay() while waiting for the APB-AHB bridge to propagate the
++	 * completion event into IRQSTATUS.  IRQF_ONESHOT keeps the interrupt
++	 * line masked until the thread finishes.
++	 */
++	if (cqspi->apb_ahb_hazard)
++		ret = devm_request_threaded_irq(dev, irq, cqspi_irq_handler,
++						cqspi_irq_thread, IRQF_ONESHOT,
++						pdev->name, cqspi);
++	else
++		ret = devm_request_irq(dev, irq, cqspi_irq_handler, 0,
++				       pdev->name, cqspi);
+ 	if (ret) {
+ 		dev_err(dev, "Cannot request IRQ.\n");
+ 		goto probe_reset_failed;
+-- 
+2.43.0
+

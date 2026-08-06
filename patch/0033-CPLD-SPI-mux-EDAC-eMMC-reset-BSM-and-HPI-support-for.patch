@@ -1,0 +1,1125 @@
+From 229ee15942425cd61cbd874e89427ab94854a433 Mon Sep 17 00:00:00 2001
+From: Sahil Chaudhari <sahil.chaudhari@amd.com>
+Date: Mon, 13 Jul 2026 12:54:16 +0530
+Subject: [PATCH 33/33] CPLD SPI mux, EDAC, eMMC reset, BSM, and HPI support
+ for Salina
+
+Signed-off-by: Sahil Chaudhari <sahil.chaudhari@amd.com>
+---
+ drivers/edac/Kconfig           |   8 +
+ drivers/edac/Makefile          |   1 +
+ drivers/edac/salina_edac.c     | 282 +++++++++++++++++++++++++++++++++
+ drivers/mfd/pensando-elbasr.c  |  11 +-
+ drivers/mmc/core/mmc_ops.c     |  31 +++-
+ drivers/mtd/spi-nor/winbond.c  |   3 +
+ drivers/reset/reset-elbasr.c   | 110 ++++++++++---
+ drivers/soc/pensando/cap_bsm.c | 108 ++++++++-----
+ drivers/spi/Kconfig            |  15 ++
+ drivers/spi/Makefile           |   1 +
+ drivers/spi/spi-cpld-spimux.c  | 255 +++++++++++++++++++++++++++++
+ 11 files changed, 767 insertions(+), 58 deletions(-)
+ create mode 100644 drivers/edac/salina_edac.c
+ create mode 100644 drivers/spi/spi-cpld-spimux.c
+
+diff --git a/drivers/edac/Kconfig b/drivers/edac/Kconfig
+index 00d07cf..9670a6f 100644
+--- a/drivers/edac/Kconfig
++++ b/drivers/edac/Kconfig
+@@ -549,3 +549,11 @@ config EDAC_ELBA
+ 	  Pensando Elba SoC.
+ 
+ endif # EDAC
++
++config EDAC_SALINA
++	tristate "Pensando Salina Memory ECC"
++	depends on ARCH_PENSANDO
++	help
++	  Support for ECC error detection and correction on AMD Pensando
++	  Salina SoC (4 DDR5 memory controllers).
++
+diff --git a/drivers/edac/Makefile b/drivers/edac/Makefile
+index 6e11717..d210185 100644
+--- a/drivers/edac/Makefile
++++ b/drivers/edac/Makefile
+@@ -87,3 +87,4 @@ obj-$(CONFIG_EDAC_ASPEED)		+= aspeed_edac.o
+ obj-$(CONFIG_EDAC_BLUEFIELD)		+= bluefield_edac.o
+ obj-$(CONFIG_EDAC_DMC520)		+= dmc520_edac.o
+ obj-$(CONFIG_EDAC_ELBA)			+= elba_edac.o
++obj-$(CONFIG_EDAC_SALINA)		+= salina_edac.o
+diff --git a/drivers/edac/salina_edac.c b/drivers/edac/salina_edac.c
+new file mode 100644
+index 0000000..04e644e
+--- /dev/null
++++ b/drivers/edac/salina_edac.c
+@@ -0,0 +1,282 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * AMD Pensando Salina Memory Controller EDAC Driver
++ *
++ * Copyright (c) 2026, Advanced Micro Devices Inc.
++ */
++
++#include <linux/edac.h>
++#include <linux/platform_device.h>
++#include <linux/notifier.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++#include <linux/panic_notifier.h>
++#include "edac_module.h"
++
++#define SAL_MC_NCHANS			4
++#define SAL_MC_MCTL_OFFS		0x60000
++
++#define SAL_MCTL_ECC_U_ADDR		240
++#define SAL_MCTL_ECC_U_SYND		241
++#define SAL_MCTL_ECC_C_ADDR		244
++#define SAL_MCTL_ECC_C_SYND		245
++#define SAL_MCTL_ECC_ID			248
++#define SAL_MCTL_INT_STAT_ECC		315
++#define SAL_MCTL_INT_ACK_ECC		324
++
++#define SAL_MCTL_ECC_ADDR(a, s)		((a) | ((u64)((s) & 0xff) << 32))
++#define SAL_MCTL_ECC_SYND(s)		(((s) >> 8) & 0xff)
++#define SAL_MCTL_ECC_U_ID(n)		((n) & 0xffff)
++#define SAL_MCTL_ECC_C_ID(n)		(((n) >> 16) & 0xffff)
++
++#define SAL_MCTL_INT_MULTI_U_ECC	BIT(3)
++#define SAL_MCTL_INT_U_ECC		BIT(2)
++#define SAL_MCTL_INT_MULTI_C_ECC	BIT(1)
++#define SAL_MCTL_INT_C_ECC		BIT(0)
++
++#define SAL_MCTL_INT_ACK_MASK		0xf
++
++struct salina_mcdata {
++	void __iomem *base[SAL_MC_NCHANS];	// per-channel memory controller registers
++};
++
++static struct salina_mcdata *g_mcp;
++
++struct salina_mcpoll_res {
++	u64 ddr_addr;			// ecc address reported by the mc
++	u64 bus_addr;			// system bus address (or 0 if no map)
++	u16 cnt;			// ecc count (1=single, 2=multiple)
++	u16 id;				// axi source id info
++	u8 synd;			// ecc syndrome
++	char msg[128];			// informational message
++};
++
++static inline u32 salina_mctl_read(struct salina_mcdata *mcp, int chan, int reg)
++{
++	return readl(mcp->base[chan] + SAL_MC_MCTL_OFFS + 4 * reg);
++}
++
++static inline void salina_mctl_write(struct salina_mcdata *mcp, int chan, int reg,
++				     u32 data)
++{
++	writel(data, mcp->base[chan] + SAL_MC_MCTL_OFFS + 4 * reg);
++}
++
++/* TODO: implement via Salina BL31 DDR SMC once ATF support lands. */
++static u64 salina_ddr_addr_to_bus(struct salina_mcdata *mcp, u64 ddr_addr)
++{
++	return ddr_addr;
++}
++
++static int salina_edac_mc_c_poll(struct salina_mcdata *mcp, int chan, u32 int_stat,
++				 struct salina_mcpoll_res *res)
++{
++	u32 addr, synd, id;
++
++	if (!(int_stat & SAL_MCTL_INT_C_ECC))
++		return 0;
++
++	res->cnt = (int_stat & SAL_MCTL_INT_MULTI_C_ECC) ? 2 : 1;
++	addr = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_C_ADDR);
++	synd = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_C_SYND);
++	id   = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_ID);
++	res->ddr_addr = SAL_MCTL_ECC_ADDR(addr, synd);
++	res->bus_addr = salina_ddr_addr_to_bus(mcp, res->ddr_addr);
++	res->synd = SAL_MCTL_ECC_SYND(synd);
++	res->id   = SAL_MCTL_ECC_C_ID(id);
++	snprintf(res->msg, sizeof(res->msg), "ddr_addr 0x%llx, id 0x%04x",
++			res->ddr_addr, res->id);
++	return 1;
++}
++
++static int salina_edac_mc_u_poll(struct salina_mcdata *mcp, int chan, u32 int_stat,
++				 struct salina_mcpoll_res *res)
++{
++	u32 addr, synd, id;
++
++	if (!(int_stat & SAL_MCTL_INT_U_ECC))
++		return 0;
++
++	res->cnt = (int_stat & SAL_MCTL_INT_MULTI_U_ECC) ? 2 : 1;
++	addr = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_U_ADDR);
++	synd = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_U_SYND);
++	id   = salina_mctl_read(mcp, chan, SAL_MCTL_ECC_ID);
++	res->ddr_addr = SAL_MCTL_ECC_ADDR(addr, synd);
++	res->bus_addr = salina_ddr_addr_to_bus(mcp, res->ddr_addr);
++	res->synd = SAL_MCTL_ECC_SYND(synd);
++	res->id   = SAL_MCTL_ECC_U_ID(id);
++	snprintf(res->msg, sizeof(res->msg), "ddr_addr 0x%llx, id 0x%04x",
++			res->ddr_addr, res->id);
++	return 1;
++}
++
++static void salina_edac_mc_poll_chan(struct mem_ctl_info *mci, int chan)
++{
++	struct salina_mcdata *mcp = mci->pvt_info;
++	struct salina_mcpoll_res res;
++	u32 int_stat, int_ack;
++
++	int_stat = salina_mctl_read(mcp, chan, SAL_MCTL_INT_STAT_ECC);
++	if (salina_edac_mc_c_poll(mcp, chan, int_stat, &res)) {
++		edac_mc_handle_error(HW_EVENT_ERR_CORRECTED, mci, res.cnt,
++			res.bus_addr >> PAGE_SHIFT, res.bus_addr & ~PAGE_MASK,
++			res.synd, chan, -1, -1, res.msg, "");
++	}
++
++	if (salina_edac_mc_u_poll(mcp, chan, int_stat, &res)) {
++		edac_mc_handle_error(HW_EVENT_ERR_UNCORRECTED, mci, res.cnt,
++			res.bus_addr >> PAGE_SHIFT, res.bus_addr & ~PAGE_MASK,
++			res.synd, chan, -1, -1, res.msg, "");
++	}
++
++	int_ack = int_stat & SAL_MCTL_INT_ACK_MASK;
++	if (int_ack)
++		salina_mctl_write(mcp, chan, SAL_MCTL_INT_ACK_ECC, int_ack);
++}
++
++static void salina_edac_mc_poll(struct mem_ctl_info *mci)
++{
++	int chan;
++
++	for (chan = 0; chan < SAL_MC_NCHANS; chan++)
++		salina_edac_mc_poll_chan(mci, chan);
++}
++
++/*
++ * A read error (SError) that causes a kernel panic won't have been
++ * polled yet, so one final check for uncorrectable errors on the way down.
++ */
++static int salina_edac_mc_panic_notifier(struct notifier_block *nb,
++					 unsigned long event, void *ptr)
++{
++	struct salina_mcdata *mcp = g_mcp;
++	struct salina_mcpoll_res res;
++	u32 int_stat;
++	int chan;
++
++	for (chan = 0; chan < SAL_MC_NCHANS; chan++) {
++		int_stat = salina_mctl_read(mcp, chan, SAL_MCTL_INT_STAT_ECC);
++		if (salina_edac_mc_u_poll(mcp, chan, int_stat, &res)) {
++			pr_crit(KERN_CRIT "EDAC MC0: %u UE %s "
++				"on unknown memory (channel:%u page:0x%llx "
++				"offset:0x%llx grain:8 syndrome:0x%02x)\n",
++				res.cnt, res.msg, chan,
++				res.bus_addr >> PAGE_SHIFT,
++				res.bus_addr & ~PAGE_MASK,
++				res.synd);
++		}
++	}
++	return 0;
++}
++
++static struct notifier_block panic_block = {
++	.notifier_call = salina_edac_mc_panic_notifier
++};
++
++static void salina_init_dimms(struct mem_ctl_info *mci)
++{
++	struct dimm_info *dimm;
++	int chan;
++
++	for (chan = 0; chan < SAL_MC_NCHANS; chan++) {
++		dimm = mci->dimms[chan];
++		dimm->grain = 8;
++		dimm->mtype = MEM_DDR5;
++		dimm->dtype = DEV_X8;
++		dimm->edac_mode = EDAC_SECDED;
++		dimm->nr_pages = 1; /* not empty */
++	}
++}
++
++static int salina_edac_mc_probe(struct platform_device *pdev)
++{
++	struct edac_mc_layer layers[1];
++	struct mem_ctl_info *mci;
++	struct salina_mcdata *mcp;
++	struct resource *r;
++	void __iomem *base[SAL_MC_NCHANS];
++	int chan;
++
++	for (chan = 0; chan < SAL_MC_NCHANS; chan++) {
++		r = platform_get_resource(pdev, IORESOURCE_MEM, chan);
++		if (!r) {
++			dev_err(&pdev->dev, "Unable to get mem resource %d\n",
++				chan);
++			return -ENODEV;
++		}
++		base[chan] = devm_ioremap_resource(&pdev->dev, r);
++		if (IS_ERR(base[chan])) {
++			dev_err(&pdev->dev, "Unable to map regs %d\n", chan);
++			return PTR_ERR(base[chan]);
++		}
++	}
++
++	layers[0].type = EDAC_MC_LAYER_CHANNEL;
++	layers[0].size = SAL_MC_NCHANS;
++	layers[0].is_virt_csrow = false;
++
++	mci = edac_mc_alloc(0, 1, layers, sizeof(struct salina_mcdata));
++	if (!mci)
++		return -ENXIO;
++
++	mcp = mci->pvt_info;
++	for (chan = 0; chan < SAL_MC_NCHANS; chan++)
++		mcp->base[chan] = base[chan];
++
++	salina_init_dimms(mci);
++
++	mci->pdev = &pdev->dev;
++	mci->dev_name = dev_name(&pdev->dev);
++
++	mci->mod_name = "salina-mc";
++	mci->ctl_name = "salina-mc-err";
++	mci->edac_check = salina_edac_mc_poll;
++	mci->edac_cap = EDAC_FLAG_SECDED;
++
++	if (edac_mc_add_mc(mci)) {
++		dev_err(&pdev->dev, "edac_mc_add_mc() failed\n");
++		edac_mc_free(mci);
++		return -ENXIO;
++	}
++
++	platform_set_drvdata(pdev, mci);
++
++	/* hook panic() so we can check for uncorrectable errors */
++	g_mcp = mcp;
++	atomic_notifier_chain_register(&panic_notifier_list, &panic_block);
++
++	/* set polling mode */
++	opstate_init();
++
++	return 0;
++}
++
++static int salina_edac_mc_remove(struct platform_device *pdev)
++{
++	struct mem_ctl_info *mci = platform_get_drvdata(pdev);
++
++	edac_mc_del_mc(&pdev->dev);
++	atomic_notifier_chain_unregister(&panic_notifier_list, &panic_block);
++
++	edac_mc_free(mci);
++	return 0;
++}
++
++static const struct of_device_id salina_edac_mc_of_match[] = {
++	{ .compatible = "pensando,salina-edac-mc" },
++	{ },
++};
++
++static struct platform_driver salina_edac_mc_driver = {
++	.probe = salina_edac_mc_probe,
++	.remove = salina_edac_mc_remove,
++	.driver = {
++		.name = "salina_edac_mc",
++		.of_match_table = of_match_ptr(salina_edac_mc_of_match),
++	}
++};
++module_platform_driver(salina_edac_mc_driver);
++
++MODULE_DESCRIPTION("AMD Pensando Salina platform EDAC memory controller driver");
++MODULE_AUTHOR("Advanced Micro Devices, Inc.");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mfd/pensando-elbasr.c b/drivers/mfd/pensando-elbasr.c
+index e589634..537c3e2 100644
+--- a/drivers/mfd/pensando-elbasr.c
++++ b/drivers/mfd/pensando-elbasr.c
+@@ -798,12 +798,21 @@ static int elbasr_spi_probe(struct spi_device *spi)
+ 		struct device *dev;
+ 
+ 		elbasr->devt = MKDEV(MAJOR(elbasr_devt), minor);
++
++		/*
++		 * Force bus number to 0 so that the device nodes are always
++		 * /dev/spidev0.x regardless of the physical SPI controller
++		 * bus number (which can be 3 on Salina due to the CPLD mux).
++		 *
++		 * This keeps userspace tools (cpldapp, etc.) unchanged and
++		 * matches the legacy Elba behavior.
++		 */
+ 		dev = device_create(elbasr_class,
+ 				    &spi->dev,
+ 				    elbasr->devt,
+ 				    elbasr,
+ 				    "spidev%d.%d",
+-				    spi->master->bus_num,
++				    0,
+ 				    spi->chip_select);
+ 
+ 		status = PTR_ERR_OR_ZERO(dev);
+diff --git a/drivers/mmc/core/mmc_ops.c b/drivers/mmc/core/mmc_ops.c
+index 3b3adbd..23e5ebd 100644
+--- a/drivers/mmc/core/mmc_ops.c
++++ b/drivers/mmc/core/mmc_ops.c
+@@ -23,6 +23,7 @@
+ #define MMC_SANITIZE_TIMEOUT_MS		(240 * 1000) /* 240s */
+ #define MMC_OP_COND_PERIOD_US		(4 * 1000) /* 4ms */
+ #define MMC_OP_COND_TIMEOUT_MS		1000 /* 1s */
++#define MMC_CACHE_FLUSH_INTERRUPT_MS	(3 * 1000) /* 3s */
+ 
+ static const u8 tuning_blk_pattern_4bit[] = {
+ 	0xff, 0x0f, 0xff, 0x00, 0xff, 0xcc, 0xc3, 0xcc,
+@@ -66,6 +67,8 @@ struct mmc_op_cond_busy_data {
+ 	struct mmc_command *cmd;
+ };
+ 
++static int mmc_send_hpi_cmd(struct mmc_card *card);
++
+ int __mmc_send_status(struct mmc_card *card, u32 *status, unsigned int retries)
+ {
+ 	int err;
+@@ -505,12 +508,24 @@ int __mmc_poll_for_busy(struct mmc_host *host, unsigned int period_us,
+ 			void *cb_data)
+ {
+ 	int err;
+-	unsigned long timeout;
++	unsigned long timeout, timeout_hpi;
+ 	unsigned int udelay = period_us ? period_us : 32, udelay_max = 32768;
++	struct mmc_busy_data *data = cb_data;
++	struct mmc_card *card = data->card;
++	bool hpi_expired = false;
++	bool hpi_sent = false;
+ 	bool expired = false;
+ 	bool busy = false;
+ 
+ 	timeout = jiffies + msecs_to_jiffies(timeout_ms) + 1;
++
++	/*
++	 * Cache flush is periodically sent (~5-7 secconds).  Interrupt a lengthy
++	 * cache flush to allow timely normal IO and continue the flush when the
++	 * next cache flush command is sent.
++	 */
++	timeout_hpi = jiffies + msecs_to_jiffies(MMC_CACHE_FLUSH_INTERRUPT_MS) + 1;
++
+ 	do {
+ 		/*
+ 		 * Due to the possibility of being preempted while polling,
+@@ -522,6 +537,20 @@ int __mmc_poll_for_busy(struct mmc_host *host, unsigned int period_us,
+ 		if (err)
+ 			return err;
+ 
++		hpi_expired = time_after(jiffies, timeout_hpi);
++		if (!hpi_sent && card->ext_csd.hpi_en && hpi_expired && busy &&
++		    data->busy_cmd == MMC_BUSY_CMD6) {
++			err = mmc_send_hpi_cmd(card);
++			if (err) {
++				pr_err("%s: HPI to interrupt cache flush failed %d\n",
++				       mmc_hostname(host), err);
++			} else {
++				pr_info("%s: HPI sent to interrupt cache flush\n",
++					mmc_hostname(host));
++				hpi_sent = true;
++			}
++		}
++
+ 		/* Timeout if the device still remains busy. */
+ 		if (expired && busy) {
+ 			pr_err("%s: Card stuck being busy! %s\n",
+diff --git a/drivers/mtd/spi-nor/winbond.c b/drivers/mtd/spi-nor/winbond.c
+index 58aba52..492683c 100644
+--- a/drivers/mtd/spi-nor/winbond.c
++++ b/drivers/mtd/spi-nor/winbond.c
+@@ -141,6 +141,9 @@ static const struct flash_info winbond_nor_parts[] = {
+ 	{ "w25q512jvq", INFO(0xef4020, 0, 64 * 1024, 1024)
+ 		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ |
+ 			      SPI_NOR_QUAD_READ) },
++	{ "w25q02nw", INFO(0xef8022, 0, 64 * 1024, 4096)
++		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ |
++			      SPI_NOR_QUAD_READ) },
+ };
+ 
+ /**
+diff --git a/drivers/reset/reset-elbasr.c b/drivers/reset/reset-elbasr.c
+index 4b7db6b..c657c7a 100644
+--- a/drivers/reset/reset-elbasr.c
++++ b/drivers/reset/reset-elbasr.c
+@@ -1,6 +1,17 @@
+ // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+ /*
+  * Copyright (c) 2022 Advanced Micro Devices, Inc.
++ *
++ * Common elbasr reset controller for both Elba and Salina.
++ *
++ * On Salina (with CPLD mux) the optional property "spi-reset-frequency"
++ * (placed on the reset-controller node) is read. If present and non-zero,
++ * the parent SPI bus is temporarily forced to that frequency only for
++ * the duration of assert() and deassert(). The original speed is restored
++ * immediately after the register write.
++ *
++ * On Elba (no mux, direct physical chip selects) the property is absent
++ * or zero, so the driver behaves exactly as before (no speed change).
+  */
+ 
+ #include <linux/mfd/pensando-elbasr.h>
+@@ -9,12 +20,15 @@
+ #include <linux/regmap.h>
+ #include <linux/err.h>
+ #include <linux/of.h>
++#include <linux/spi/spi.h>
+ 
+ #include <dt-bindings/reset/amd,pensando-elba-reset.h>
+ 
+ struct elbasr_reset {
+ 	struct reset_controller_dev rcdev;
++	struct spi_device *spi;		/* cached parent SPI device */
+ 	struct regmap *regmap;
++	unsigned int reset_speed_hz;	/* 0 = no override (Elba) */
+ };
+ 
+ static inline struct elbasr_reset *to_elbasr_rst(struct reset_controller_dev *rc)
+@@ -32,52 +46,104 @@ static inline int elbasr_reset_shift(unsigned long id)
+ 	}
+ }
+ 
+-static int elbasr_reset_assert(struct reset_controller_dev *rcdev,
+-			       unsigned long id)
++static int elbasr_reset(struct reset_controller_dev *rcdev,
++			unsigned long id, bool enable)
+ {
+ 	struct elbasr_reset *elbar = to_elbasr_rst(rcdev);
+-	int val;
++	struct spi_device *spi = elbar->spi;
++	unsigned int orig_speed = 0;
++	int val, ret;
+ 	u32 mask;
+ 
++	dev_dbg(&spi->dev, "emmc_reset: %s\n", enable ? "assert" : "deassert");
++
+ 	val = elbasr_reset_shift(id);
+ 	if (val < 0)
+ 		return val;
+ 	mask = 1 << val;
+ 
+-	return regmap_update_bits(elbar->regmap, ELBASR_CTRL0_REG, mask, mask);
++	/* Temporary spi frequency reduction for emmc reset is needed */
++	if (spi && elbar->reset_speed_hz) {
++		orig_speed = spi->max_speed_hz;
++
++		dev_dbg(&spi->dev,
++			"emmc reset, temporarily setting SPI to %u Hz (was %u Hz)\n",
++			elbar->reset_speed_hz, orig_speed);
++
++		spi->max_speed_hz = elbar->reset_speed_hz;
++	}
++
++	ret = regmap_update_bits(elbar->regmap,
++				 ELBASR_CTRL0_REG,
++				 mask,
++				 enable ? mask : 0);
++
++	/* Restore original speed */
++	if (spi && orig_speed) {
++		spi->max_speed_hz = orig_speed;
++		dev_dbg(&spi->dev, "restored SPI speed to %u Hz after reset %s\n",
++			orig_speed, enable ? "assert" : "deassert");
++	}
++
++	return ret;
++}
++
++static int elbasr_reset_assert(struct reset_controller_dev *rcdev,
++			       unsigned long id)
++{
++	return elbasr_reset(rcdev, id, true);
+ }
+ 
+ static int elbasr_reset_deassert(struct reset_controller_dev *rcdev,
+ 				 unsigned long id)
+ {
+-	struct elbasr_reset *elbar = to_elbasr_rst(rcdev);
+-	int val;
+-	u32 mask;
+-
+-	val = elbasr_reset_shift(id);
+-	if (val < 0)
+-		return val;
+-	mask = 1 << val;
+-
+-	return regmap_update_bits(elbar->regmap, ELBASR_CTRL0_REG, mask, 0);
++	return elbasr_reset(rcdev, id, false);
+ }
+ 
+ static const struct reset_control_ops elbasr_reset_ops = {
+-	.assert	= elbasr_reset_assert,
++	.assert = elbasr_reset_assert,
+ 	.deassert = elbasr_reset_deassert,
+ };
+ 
+ static int elbasr_reset_probe(struct platform_device *pdev)
+ {
+-	struct elbasr_data *elbasr = dev_get_drvdata(pdev->dev.parent);
++	struct elbasr_data *elbasr;
+ 	struct elbasr_reset *elbar;
++	struct spi_device *spi_parent;
+ 	int ret;
+ 
+-	elbar = devm_kzalloc(&pdev->dev, sizeof(struct elbasr_reset),
+-			     GFP_KERNEL);
++	if (!pdev->dev.parent) {
++		dev_err(&pdev->dev, "no parent device\n");
++		return -ENODEV;
++	}
++
++	elbasr = dev_get_drvdata(pdev->dev.parent);
++	if (!elbasr) {
++		dev_err(&pdev->dev, "no elbasr_data from parent MFD\n");
++		return -ENODEV;
++	}
++
++	spi_parent = to_spi_device(pdev->dev.parent);
++	if (spi_parent) {
++		pr_info("pensando_elbasr_reset: parent SPI device %s, current max_speed_hz = %u Hz\n",
++			 dev_name(&spi_parent->dev), spi_parent->max_speed_hz);
++	} else {
++		dev_warn(&pdev->dev, "could not locate parent SPI device\n");
++	}
++
++	elbar = devm_kzalloc(&pdev->dev, sizeof(struct elbasr_reset), GFP_KERNEL);
+ 	if (!elbar)
+ 		return -ENOMEM;
+ 
++	elbar->spi = spi_parent;
++
++	/* Read optional spi-reset-frequency (Salina only, default 0 = Elba behavior) */
++	elbar->reset_speed_hz = 0;
++	of_property_read_u32(pdev->dev.of_node, "spi-reset-frequency", &elbar->reset_speed_hz);
++	if (elbar->reset_speed_hz)
++		pr_info("pensando_elbasr_reset: emmc spi-reset-frequency = %u Hz\n",
++			 elbar->reset_speed_hz);
++
+ 	elbar->rcdev.owner = THIS_MODULE;
+ 	elbar->rcdev.nr_resets = ELBASR_NR_RESETS;
+ 	elbar->rcdev.ops = &elbasr_reset_ops;
+@@ -87,6 +153,10 @@ static int elbasr_reset_probe(struct platform_device *pdev)
+ 	platform_set_drvdata(pdev, elbar);
+ 
+ 	ret = devm_reset_controller_register(&pdev->dev, &elbar->rcdev);
++	if (ret)
++		dev_err(&pdev->dev, "failed to register reset controller (ret=%d)\n", ret);
++	else
++		dev_dbg(&pdev->dev, "reset controller registered\n");
+ 
+ 	return ret;
+ }
+@@ -97,10 +167,10 @@ static const struct of_device_id elba_reset_dt_match[] = {
+ };
+ 
+ static struct platform_driver elbasr_reset_driver = {
+-	.probe	= elbasr_reset_probe,
++	.probe = elbasr_reset_probe,
+ 	.driver = {
+ 		.name = "pensando_elbasr_reset",
+-		.of_match_table	= elba_reset_dt_match,
++		.of_match_table = elba_reset_dt_match,
+ 	},
+ };
+ builtin_platform_driver(elbasr_reset_driver);
+diff --git a/drivers/soc/pensando/cap_bsm.c b/drivers/soc/pensando/cap_bsm.c
+index a55039f..8d085b5 100644
+--- a/drivers/soc/pensando/cap_bsm.c
++++ b/drivers/soc/pensando/cap_bsm.c
+@@ -14,15 +14,20 @@ extern struct kobject *pensando_fw_kobj_get(void);
+ 
+ struct bsm {
+ 	void __iomem *base;
++	resource_size_t phys;
+ 	uint32_t val;
+ };
+-static struct bsm bsm;
++
++#define BSM_MAX_INSTANCES 4
++static struct bsm bsm_instances[BSM_MAX_INSTANCES];
++static int bsm_count;
+ 
+ #define BSM_SHOW_INT(n, s) \
+ 	static ssize_t n##_show(struct device *dev,			\
+ 			struct device_attribute *attr, char *buf)	\
+ 	{								\
+-		int val = (bsm.val >> BSM_##s##_LSB) & BSM_##s##_MASK;	\
++		struct bsm *b = dev_get_drvdata(dev);			\
++		int val = (b->val >> BSM_##s##_LSB) & BSM_##s##_MASK;	\
+ 		return sprintf(buf, "%d\n", val);			\
+ 	}								\
+ 	static DEVICE_ATTR_RO(n);
+@@ -41,7 +46,8 @@ static const char *fwnames[4] = {
+ 	static ssize_t n##_show(struct device *dev,			\
+ 			struct device_attribute *attr, char *buf)	\
+ 	{								\
+-		int val = (bsm.val >> BSM_##s##_LSB) & BSM_##s##_MASK;	\
++		struct bsm *b = dev_get_drvdata(dev);			\
++		int val = (b->val >> BSM_##s##_LSB) & BSM_##s##_MASK;	\
+ 		return sprintf(buf, "%s\n", fwnames[val & 0x3]);	\
+ 	}								\
+ 	static DEVICE_ATTR_RO(n);
+@@ -52,13 +58,14 @@ BSM_SHOW_FWID(track, TRACK)
+ static ssize_t success_store(struct device *dev,
+ 		struct device_attribute *attr, const char *buf, size_t count)
+ {
++	struct bsm *b = dev_get_drvdata(dev);
+ 	long val;
+ 
+ 	if (kstrtoul(buf, 0, &val) < 0)
+ 		return -EINVAL;
+ 	if (val) {
+-		bsm.val &= ~(1 << BSM_RUNNING_LSB);
+-		writel(bsm.val, bsm.base);
++		b->val &= ~(1 << BSM_RUNNING_LSB);
++		writel(b->val, b->base);
+ 	}
+ 
+ 	return count;
+@@ -76,18 +83,41 @@ static const struct device_attribute *bsm_attrs[] = {
+ 	&dev_attr_success,
+ };
+ 
++static const struct of_device_id bsm_of_match[] = {
++	{ .compatible = "pensando,bsm" },
++	{ }
++};
++
+ static int bsm_probe(struct platform_device *pdev)
+ {
+ 	struct kobject *pensando_kobj;
++	struct resource *res;
++	struct bsm *b = NULL;
++	const char *symlink_name;
+ 	int i, r = 0;
+ 
+-	if (bsm.base == NULL) {
+-		/* bsm not in device-tree */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
+ 		return -ENODEV;
++
++	/* Find the pre-mapped instance from early init by physical address */
++	for (i = 0; i < bsm_count; i++) {
++		if (bsm_instances[i].phys == res->start) {
++			b = &bsm_instances[i];
++			break;
++		}
+ 	}
++	if (!b) {
++		pr_err("bsm: no early-init data for %pa\n", &res->start);
++		return -ENODEV;
++	}
++
++	platform_set_drvdata(pdev, b);
++
+ 	pensando_kobj = pensando_fw_kobj_get();
+ 	if (!pensando_kobj)
+ 		return -ENOMEM;
++
+ 	for (i = 0; i < ARRAY_SIZE(bsm_attrs); i++) {
+ 		r = device_create_file(&pdev->dev, bsm_attrs[i]);
+ 		if (r) {
+@@ -95,7 +125,9 @@ static int bsm_probe(struct platform_device *pdev)
+ 			return r;
+ 		}
+ 	}
+-	r = sysfs_create_link(pensando_kobj, &pdev->dev.kobj, "bsm");
++
++	symlink_name = pdev->dev.of_node ? pdev->dev.of_node->name : dev_name(&pdev->dev);
++	r = sysfs_create_link(pensando_kobj, &pdev->dev.kobj, symlink_name);
+ 	if (r) {
+ 		pr_err("failed to create sysfs symlink\n");
+ 		kobject_put(pensando_kobj);
+@@ -104,10 +136,6 @@ static int bsm_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static const struct of_device_id bsm_of_match[] = {
+-	{ .compatible = "pensando,bsm" },
+-};
+-
+ static struct platform_driver bsm_driver = {
+ 	.driver = {
+ 		.name = "capri-bsm",
+@@ -120,40 +148,48 @@ builtin_platform_driver(bsm_driver);
+ 
+ /*
+  * Boot State Machine init.
+- * If auto-booting, then set the BSM_RUNNING bit in the BSM register
+- * to continue BSM protection.	The bit will be cleared when userland comes up.
++ * Find all BSM nodes in device tree, map their registers, and if
++ * auto-booting set the BSM_RUNNING bit to continue BSM protection.
++ * The bit will be cleared when userland comes up.
+  */
+ static int __init cap_bsm_init(void)
+ {
+ 	const struct of_device_id *match;
+-	struct device_node *np;
++	struct device_node *np = NULL;
+ 	struct resource res;
+ 
+-	np = of_find_matching_node_and_match(NULL, bsm_of_match, &match);
+-	if (!np) {
+-		/* Not found in the device-tree.  Quietly resign */
+-		return 0;
+-	}
+-	if (of_address_to_resource(np, 0, &res) < 0) {
+-		pr_err("failed to get BSM registers\n");
+-		of_node_put(np);
+-		return -ENXIO;
+-	}
+-	of_node_put(np);
++	while ((np = of_find_matching_node_and_match(np, bsm_of_match, &match))) {
++		struct bsm *b;
+ 
+-	bsm.base = ioremap(res.start, resource_size(&res));
+-	if (!bsm.base) {
+-		pr_err("failed to map BSM register\n");
+-		return -ENXIO;
+-	}
++		if (bsm_count >= BSM_MAX_INSTANCES) {
++			pr_warn("bsm: too many BSM instances, skipping %s\n", np->name);
++			of_node_put(np);
++			break;
++		}
++
++		if (of_address_to_resource(np, 0, &res) < 0) {
++			pr_err("bsm: failed to get registers for %s\n", np->name);
++			continue;
++		}
++
++		b = &bsm_instances[bsm_count];
++		b->phys = res.start;
++		b->base = ioremap(res.start, resource_size(&res));
++		if (!b->base) {
++			pr_err("bsm: failed to map register for %s\n", np->name);
++			continue;
++		}
+ 
+-	bsm.val = readl(bsm.base);
++		b->val = readl(b->base);
+ #ifdef CONFIG_PENSANDO_SOC_BSM_ENABLE
+-	if (bsm.val & (1 << BSM_AUTOBOOT_LSB)) {
+-		bsm.val |= 1 << BSM_RUNNING_LSB;
+-		writel(bsm.val, bsm.base);
+-	}
++		if (b->val & (1 << BSM_AUTOBOOT_LSB)) {
++			b->val |= 1 << BSM_RUNNING_LSB;
++			writel(b->val, b->base);
++		}
+ #endif
++		bsm_count++;
++	}
++
+ 	return 0;
+ }
+ early_initcall(cap_bsm_init);
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 15ea11e..94034c6 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -281,6 +281,21 @@ config SPI_DESIGNWARE
+ if SPI_DESIGNWARE
+ 
+ config SPI_DW_DMA
++config SPI_CPLD_SPIMUX
++	tristate "AMD Pensando Salina CPLD SPI mux"
++	depends on ARCH_PENSANDO_SALINA_SOC && SPI_MASTER
++	help
++	  This driver supports the CPLD-based SPI multiplexer
++	  present on AMD Pensando Salina platforms.
++
++	  The CPLD requires a register write on chip select 0
++	  to select the downstream SPI target before accessing
++	  devices behind chip selects 1..3.
++
++	  This driver exposes a virtual SPI controller which
++	  performs the required mux sequencing transparently
++	  for SPI clients.
++
+ 	bool "DMA support for DW SPI controller"
+ 
+ config SPI_DW_PCI
+diff --git a/drivers/spi/Makefile b/drivers/spi/Makefile
+index 4b34e85..373561c 100644
+--- a/drivers/spi/Makefile
++++ b/drivers/spi/Makefile
+@@ -40,6 +40,7 @@ obj-$(CONFIG_SPI_CLPS711X)		+= spi-clps711x.o
+ obj-$(CONFIG_SPI_COLDFIRE_QSPI)		+= spi-coldfire-qspi.o
+ obj-$(CONFIG_SPI_DAVINCI)		+= spi-davinci.o
+ obj-$(CONFIG_SPI_DLN2)			+= spi-dln2.o
++obj-$(CONFIG_SPI_CPLD_SPIMUX)		+= spi-cpld-spimux.o
+ obj-$(CONFIG_SPI_DESIGNWARE)		+= spi-dw.o
+ spi-dw-y				:= spi-dw-core.o
+ spi-dw-$(CONFIG_SPI_DW_DMA)		+= spi-dw-dma.o
+diff --git a/drivers/spi/spi-cpld-spimux.c b/drivers/spi/spi-cpld-spimux.c
+new file mode 100644
+index 0000000..4005099
+--- /dev/null
++++ b/drivers/spi/spi-cpld-spimux.c
+@@ -0,0 +1,255 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Copyright 2026 Advanced Micro Devices, Inc.
++ */
++
++/*
++ * AMD Pensando Salina CPLD SPI mux
++ *
++ * Background (Elba vs Salina)
++ * ---------------------------
++ *
++ * On Elba, the SPI controller exposes four logical chip selects:
++ * CS0 to the CPLD registers and CS1-CS3 to devices.
++ *
++ *   CS0, CS1  - controlled via SPICS override register
++ *   CS2, CS3  - controlled via GPIOs (cs-gpios in DT)
++ *
++ * On Salina, the wiring is different:
++ *
++ *   - Only CS0 and CS1 are physically used (via SPICS override)
++ *   - CS2 and CS3 are not used as independent chip selects
++ *   - CS0 selects the CPLD registers (the same as Elba).
++ *   - CPLD register DPU_CSMAP selects the other devices.
++ *
++ * CPLD mux operation via CPLD register 0x05 (DPU_CSMAP)
++ * -----------------------------------------------------
++ *
++ *   CPLD register 0x05 (DPU_CSMAP) - Virtual CS
++ *
++ *   Value  Description
++ *   -----  ------------------------------------------
++ *   0x00   Disabled
++ *   0x01   CPLD internal flash
++ *   0x02   Lattice RD1173 (SPI-to-I2C bridge)
++ *   0x03   SMBus over SPI
++ *
++ * Accessing a downstream device requires:
++ *
++ *   1. Write the selector via CS0 (CPLD register space)
++ *   2. Perform the SPI transfer via CS1 (shared data path)
++ *
++ * SPI controller behavior
++ * -----------------------
++ *
++ * The DesignWare SPI controller still requires a "native" chip select
++ * to be asserted to start the serial engine. This driver reuses the
++ * existing Elba logic:
++ *
++ *   - The controller is always kicked using native CS0
++ *   - SPICS override selects the actual external chip (CS0 or CS1)
++ *
++ * Effectively:
++ *
++ *   - CS0 => CPLD register space
++ *   - CS1 => multiplexed data path
++ *   - CS2/CS3 => unused on Salina
++ *
++ * Virtual SPI controller
++ * ----------------------
++ *
++ * To present a standard SPI interface to clients, this driver creates
++ * a virtual SPI controller:
++ *
++ *   Virtual CS    Operation
++ *   ----------    --------------------------------------------
++ *   CS0           Direct access to CPLD register space (CS0)
++ *   CS1..CS3      1) Write CSMAP via CS0
++ *                 2) Forward transfer via physical CS1
++ *
++ * This keeps SPI client drivers (e.g. RD1173) unaware of the CPLD mux
++ * and avoids embedding mux logic into individual drivers.
++ */
++
++#include <linux/module.h>
++#include <linux/spi/spi.h>
++#include <linux/of.h>
++#include <linux/of_device.h>
++
++/* CPLD definitions */
++#define CPLD_CMD_WR	0x02
++#define CPLD_REG_CSMAP	0x05
++
++#define CPLD_SPI_HZ 5000000
++
++struct cpld_mux {
++	struct spi_controller *ctlr;
++	struct spi_device *parent_spi;	/* physical CS0 device */
++	struct mutex lock;
++	u8 current_cs;
++};
++
++/* Safely forward a SPI message to the parent controller */
++static int cpld_mux_forward(struct cpld_mux *mux,
++			    struct spi_message *msg)
++{
++	struct spi_message new_msg;
++	int ret;
++
++	spi_message_init(&new_msg);
++
++	/* Move transfers from original message */
++	list_splice_tail_init(&msg->transfers, &new_msg.transfers);
++
++	/* Execute on parent SPI device */
++	ret = spi_sync(mux->parent_spi, &new_msg);
++
++	/* Copy results back */
++	msg->status = new_msg.status;
++	msg->actual_length = new_msg.actual_length;
++
++	return ret;
++}
++
++static int cpld_mux_select(struct cpld_mux *mux, u8 cs)
++{
++	u8 tx[3] = { CPLD_CMD_WR, CPLD_REG_CSMAP, cs };
++	struct spi_transfer t = {
++		.tx_buf = tx,
++		.len = sizeof(tx),
++		.speed_hz = CPLD_SPI_HZ,
++		.bits_per_word = 8
++	};
++	struct spi_message m;
++	int ret;
++
++	if (mux->current_cs == cs)
++		return 0;
++
++	/* Force physical CS=0 for CPLD register access */
++	spi_set_chipselect(mux->parent_spi, 0, 0);
++
++	spi_message_init(&m);
++	spi_message_add_tail(&t, &m);
++
++	ret = cpld_mux_forward(mux, &m);
++	if (ret)
++		dev_info(&mux->parent_spi->dev, "Error writing CSMAP\n");
++
++	return ret;
++}
++
++static int cpld_mux_transfer_one_message(struct spi_controller *ctlr,
++					 struct spi_message *msg)
++{
++	struct cpld_mux *mux = spi_controller_get_devdata(ctlr);
++	struct spi_device *spi = msg->spi;
++	int cs = spi_get_chipselect(spi, 0);
++	int ret;
++
++	mutex_lock(&mux->lock);
++
++	if (cs == 0) {
++		/* Direct pass-through to CPLD register space */
++		ret = cpld_mux_forward(mux, msg);
++	} else {
++		/*
++		 * Route via CPLD mux:
++		 *  - write CSMAP register (CS0)
++		 *  - send data via CS1
++		 */
++
++		/* Select CPLD target */
++		ret = cpld_mux_select(mux, cs);
++		if (ret) {
++			dev_err(&spi->dev, "mux select failed for CS%d\n", cs);
++			goto out;
++		}
++
++		/*
++		 * Set physical CS=1 for the upcoming transfer.  The block
++		 * in the CPLD receiving the transfer has just been set by
++		 * writing to the CSMAP register.
++		 */
++		spi_set_chipselect(mux->parent_spi, 0, 1);
++
++		/* Forward full message */
++		ret = cpld_mux_forward(mux, msg);
++
++		/* Restore CS0 */
++		spi_set_chipselect(mux->parent_spi, 0, 0);
++	}
++
++out:
++	mutex_unlock(&mux->lock);
++
++	spi_finalize_current_message(ctlr);
++
++	return ret;
++}
++
++static int cpld_mux_setup(struct spi_device *spi)
++{
++	return 0;
++}
++
++static int cpld_mux_probe(struct spi_device *spi)
++{
++	struct spi_controller *ctlr;
++	struct cpld_mux *mux;
++	int ret;
++
++	ctlr = spi_alloc_master(&spi->dev, sizeof(*mux));
++	if (!ctlr)
++		return -ENOMEM;
++
++	mux = spi_controller_get_devdata(ctlr);
++	mux->ctlr = ctlr;
++	mux->parent_spi = spi;	/* physical CS0 path */
++	mux->current_cs = 0xff;
++	mutex_init(&mux->lock);
++
++	ctlr->mode_bits = SPI_MODE_0;
++	ctlr->num_chipselect = 4;
++	ctlr->setup = cpld_mux_setup;
++	ctlr->transfer_one_message = cpld_mux_transfer_one_message;
++	ctlr->dev.of_node = spi->dev.of_node;
++
++	ret = spi_register_controller(ctlr);
++	if (ret) {
++		spi_controller_put(ctlr);
++		return ret;
++	}
++
++	spi_set_drvdata(spi, mux);
++
++	dev_info(&spi->dev, "CPLD SPI mux initialized\n");
++
++	return 0;
++}
++
++static void cpld_mux_remove(struct spi_device *spi)
++{
++	struct cpld_mux *mux = spi_get_drvdata(spi);
++
++	spi_unregister_controller(mux->ctlr);
++}
++
++static const struct of_device_id cpld_mux_of_match[] = {
++	{ .compatible = "amd,pensando-cpld-spimux" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, cpld_mux_of_match);
++
++static struct spi_driver cpld_mux_driver = {
++	.driver = {
++		.name = "cpld-spimux",
++		.of_match_table = cpld_mux_of_match,
++	},
++	.probe = cpld_mux_probe,
++	.remove = cpld_mux_remove,
++};
++
++module_spi_driver(cpld_mux_driver);
++
++MODULE_LICENSE("GPL");
+-- 
+2.43.0
+

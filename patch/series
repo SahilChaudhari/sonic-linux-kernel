@@ -226,6 +226,10 @@ cisco-npu-disable-other-bars.patch
 0028-Create-miniaturised-diafgw-partition-for-128MB-flash.patch
 0029-pcie-if-hotplug-enabled-do-immediate-reset-on-panic.patch
 0030-Add-Salina-ASIC-support.patch
+0031-Salina-stability-sdhci-bounce-buffer-SError-handling.patch
+0032-I2C-MCTP-sensor-QSPI-and-full-DTS-port-for-Salina.patch
+0033-CPLD-SPI-mux-EDAC-eMMC-reset-BSM-and-HPI-support-for.patch
+0034-Fix-DTS-compatible-string-mismatches.patch
 
 # Security patch
 0001-Change-the-system.map-file-permission-only-readable-.patch

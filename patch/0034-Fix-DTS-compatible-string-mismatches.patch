@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sahil Chaudhari <sahil.chaudhari@amd.com>
+Date: Sun, 20 Jul 2026 10:00:00 +0530
+Subject: [PATCH] Fix compatible string mismatches for SPI and QSPI drivers
+
+1. Add AMD-prefixed compatible strings to spi-dw-mmio driver
+2. Add pensando,spics property to spi0/spi1 DTS nodes so the
+   sonic kernel's dw_spi_elba_init/dw_spi_salina_init can find
+   the SPICS register via the syscon phandle
+3. Add AMD-prefixed compatible string to cadence-quadspi driver
+   so the Pensando APB-AHB hazard workaround is activated on
+   Salina (DTS uses "amd,pensando-elba-qspi" not "pensando,elba-qspi")
+
+Without pensando,spics, spi0 probe fails:
+  "dw_spi_mmio b0000.spi: could not find pensando,spics"
+
+Without the qspi match, Salina falls through to generic "cdns,qspi-nor"
+which lacks the APB-AHB hazard workaround, causing indirect write timeouts.
+
+Signed-off-by: Sahil Chaudhari <sahil.chaudhari@amd.com>
+---
+ arch/arm64/boot/dts/pensando/salina-asic.dtsi | 2 ++
+ drivers/spi/spi-cadence-quadspi.c             | 4 ++++
+ drivers/spi/spi-dw-mmio.c                     | 2 ++
+ 3 files changed, 8 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/pensando/salina-asic.dtsi b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+--- a/arch/arm64/boot/dts/pensando/salina-asic.dtsi
++++ b/arch/arm64/boot/dts/pensando/salina-asic.dtsi
+@@ -96,6 +96,7 @@
+ 		spi0: spi@b0000 {
+ 			compatible = "amd,pensando-elba-spi";
+ 			reg = <0x0 0xb0000 0x0 0x100>;
++			pensando,spics = <&syscon 0x66c 0x66c>;
+ 			amd,pensando-elba-syscon = <&syscon>;
+ 			clocks = <&ahb_clk>;
+ 			interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
+@@ -105,6 +106,7 @@
+ 		spi1: spi@c0000 {
+ 			compatible = "amd,pensando-elba-spi";
+ 			reg = <0x0 0xc0000 0x0 0x100>;
++			pensando,spics = <&syscon 0x66c 0x66c>;
+ 			amd,pensando-elba-syscon = <&syscon>;
+ 			clocks = <&ahb_clk>;
+ 			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+diff --git a/drivers/spi/spi-cadence-quadspi.c b/drivers/spi/spi-cadence-quadspi.c
+--- a/drivers/spi/spi-cadence-quadspi.c
++++ b/drivers/spi/spi-cadence-quadspi.c
+@@ -2008,6 +2008,10 @@ static const struct of_device_id cqspi_dt_ids[] = {
+ 		.compatible = "intel,socfpga-qspi",
+ 		.data = &socfpga_qspi,
+ 	},
++	{
++		.compatible = "amd,pensando-elba-qspi",
++		.data = &pen_cdns_qspi,
++	},
+ 	{
+ 		.compatible = "pensando,elba-qspi",
+ 		.data = &pen_cdns_qspi,
+diff --git a/drivers/spi/spi-dw-mmio.c b/drivers/spi/spi-dw-mmio.c
+--- a/drivers/spi/spi-dw-mmio.c
++++ b/drivers/spi/spi-dw-mmio.c
+@@ -382,6 +382,8 @@ static const struct of_device_id dw_spi_mmio_of_match[] = {
+ 	{ .compatible = "canaan,k210-spi", dw_spi_canaan_k210_init},
+ 	{ .compatible = "pensando,elba-spi", .data = dw_spi_elba_init },
+ 	{ .compatible = "pensando,salina-spi", .data = dw_spi_salina_init },
++	{ .compatible = "amd,pensando-elba-spi", .data = dw_spi_elba_init },
++	{ .compatible = "amd,pensando-salina-spi", .data = dw_spi_salina_init },
+ 	{ /* end of table */}
+ };
+ MODULE_DEVICE_TABLE(of, dw_spi_mmio_of_match);
